@@ -1,24 +1,90 @@
-import Foundation
+import AppKit
 
-/// `Pladespiller --nowplaying-log [--mock]`: logger hvad der spiller, uden at vise vinduet.
+/// `Pladespiller --nowplaying-log [flag]`: logger hvad der spiller, uden at vise vinduet.
 /// Bruges til at teste kilderne fra kommandolinjen. Ejes af Musikdata-agenten.
+///
+/// Flag:
+///   --mock                 testkilden i stedet for Spotify/Musik
+///   --selftest             kør parser-/logiktest på eksempeldata (sender ingen Apple Events) og afslut
+///   --cmd playpause|next|previous   send en kommando 2 s efter start
+///   --app spotify|music    hvilken app --cmd sendes til (standard: den der vises)
+///   --print-scripts        udskriv de AppleScripts der bruges, og afslut
+///   --quiet                kun ændringer i det viste, ikke kildernes hændelser
 enum NowPlayingDebugCLI {
+    private static let clock: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss.SSS"
+        return f
+    }()
+
+    private static func out(_ s: String) {
+        print(clock.string(from: .now), s)
+        fflush(stdout)
+    }
+
     static func run(mock: Bool) -> Never {
-        let store = NowPlayingStore(sources: mock ? [MockNowPlayingSource()] : NowPlayingStore.defaultSources())
+        let args = CommandLine.arguments
+        func value(after flag: String) -> String? {
+            guard let i = args.firstIndex(of: flag), args.indices.contains(i + 1) else { return nil }
+            return args[i + 1]
+        }
+        if args.contains("--print-scripts") {
+            let scripts: [(String, String)] = [
+                ("spotify-status", SpotifySource.statusScriptSource),
+                ("spotify-playpause", SpotifySource().commandScript(.playPause)),
+                ("musik-status", MusicSource.statusScriptSource),
+                ("musik-cover", MusicSource.artworkScriptSource),
+                ("musik-forrige", MusicSource().commandScript(.previous)),
+            ]
+            for (name, src) in scripts { print("-- \(name)\n\(src)\n") }
+            exit(0)
+        }
+        if args.contains("--selftest") {
+            exit(NowPlayingSelfTest.run() ? 0 : 1)
+        }
+
+        if !args.contains("--quiet") { NowPlayingLog.handler = { out("  · " + $0) } }
+
+        let sources: [NowPlayingSource] = mock ? [MockNowPlayingSource()] : NowPlayingStore.defaultSources()
+        let store = NowPlayingStore(sources: sources)
+        out("Starter (\(mock ? "testkilde" : "Spotify + Musik")). Ctrl-C for at stoppe.")
         store.start()
+
+        if let cmd = value(after: "--cmd") {
+            let app = value(after: "--app")
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                do {
+                    let target: NowPlayingSource?
+                    switch app {
+                    case "spotify": target = sources.first { $0.bundleID == NowPlaying.BundleID.spotify }
+                    case "music", "musik": target = sources.first { $0.bundleID == NowPlaying.BundleID.music }
+                    default: target = nil
+                    }
+                    out("Sender \(cmd) til \(target?.bundleID ?? "den viste kilde")")
+                    switch cmd {
+                    case "playpause": target.map { $0.playPause() } ?? store.playPause()
+                    case "next": target.map { $0.nextTrack() } ?? store.nextTrack()
+                    case "previous", "prev": target.map { $0.previousTrack() } ?? store.previousTrack()
+                    default: out("Ukendt kommando: \(cmd) (brug playpause, next, previous)")
+                    }
+                }
+            }
+        }
+
         var last: String?
-        let timer = Timer(timeInterval: 0.5, repeats: true) { _ in
+        let timer = Timer(timeInterval: 0.25, repeats: true) { _ in
             MainActor.assumeIsolated {
                 let line: String
                 if let np = store.current {
                     line = "\(np.isPlaying ? "▶︎" : "⏸") \(np.title) – \(np.artist) [\(np.album)] "
-                        + "\(formatTime(np.position())) / \(formatTime(np.duration)) "
-                        + "cover:\(np.artwork.map { "\(Int($0.size.width))×\(Int($0.size.height))" } ?? "nej") "
+                        + "\(formatTime(np.position())) / \(np.duration > 0 ? formatTime(np.duration) : "?") "
+                        + "cover:\(np.artwork.map(PlayerAppSource.pixelSize) ?? "nej") "
                         + "kilde:\(np.sourceAppBundleID)"
                 } else {
                     line = "Intet spiller"
                 }
-                if line != last { print(ISO8601DateFormatter().string(from: .now), line); fflush(stdout); last = line }
+                if line != last { out(line); last = line }
             }
         }
         RunLoop.main.add(timer, forMode: .common)
