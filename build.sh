@@ -92,8 +92,17 @@ fi
 # --- Installér / start -------------------------------------------------------
 if $install; then
   if pgrep -x "$APP_NAME" >/dev/null; then
+    echo "Lukker den kørende $APP_NAME…"
     pkill -x "$APP_NAME" || true
-    for _ in {1..20}; do pgrep -x "$APP_NAME" >/dev/null || break; sleep 0.1; done
+    for _ in {1..50}; do pgrep -x "$APP_NAME" >/dev/null || break; sleep 0.1; done
+    if pgrep -x "$APP_NAME" >/dev/null; then
+      echo "Bemærk: $APP_NAME lukkede ikke inden for 5 sekunder – tvinger den til at lukke."
+      pkill -9 -x "$APP_NAME" || true
+      for _ in {1..20}; do pgrep -x "$APP_NAME" >/dev/null || break; sleep 0.1; done
+    fi
+    if pgrep -x "$APP_NAME" >/dev/null; then
+      die "$APP_NAME kører stadig og kunne ikke lukkes. Luk den selv (Aktivitetsovervågning) og prøv igen."
+    fi
   fi
   mkdir -p "$INSTALL_DIR" || die "kunne ikke oprette $INSTALL_DIR"
   rm -rf "$INSTALL_DIR/$APP_NAME.app"

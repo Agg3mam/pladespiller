@@ -20,7 +20,7 @@ if (( ${#keep} != ${#search} )); then
 fi
 
 if [[ -f "$SIGN_KEYCHAIN" ]]; then
-  security delete-keychain "$SIGN_KEYCHAIN" 2>/dev/null || rm -f "$SIGN_KEYCHAIN"
+  security delete-keychain "$SIGN_KEYCHAIN" 2>/dev/null; rm -f "$SIGN_KEYCHAIN"
   echo "Slettet: $SIGN_KEYCHAIN"
 fi
 if [[ -f "$SIGN_PASS_FILE" ]]; then
