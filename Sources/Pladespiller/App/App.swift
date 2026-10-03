@@ -28,8 +28,11 @@ enum PladespillerMain {
         }
 
         // Kun én kopi ad gangen.
+        let me = NSRunningApplication.current
         if let id = Bundle.main.bundleIdentifier,
-           NSRunningApplication.runningApplications(withBundleIdentifier: id).count > 1 {
+           NSRunningApplication.runningApplications(withBundleIdentifier: id).contains(where: {
+               $0 != me && !$0.isTerminated && $0.processIdentifier < me.processIdentifier
+           }) {
             exit(0)
         }
 
@@ -37,7 +40,7 @@ enum PladespillerMain {
         let delegate = AppDelegate(mock: mock)
         app.delegate = delegate
         app.setActivationPolicy(.accessory)
-        app.run()
+        withExtendedLifetime(delegate) { app.run() }
     }
 }
 
