@@ -1,14 +1,18 @@
 import AppKit
 
-/// Spotify via AppleScript (NSAppleScript) + `com.spotify.client.PlaybackStateChanged`.
+/// Spotify via pid-adresserede Apple Events (reserve: AppleScript) + `com.spotify.client.PlaybackStateChanged`.
 ///
 /// Notifikationen indeholder næsten alt (tilstand, navn, kunstner, album, varighed, position, id),
-/// så AppleScript bruges kun ved ny sang (for at få artwork url), når position mangler,
-/// og som sikkerhedsnet hvert 5. sekund mens der spilles.
+/// så Apple Events bruges kun ved ny sang (for at få artwork url), når position mangler,
+/// efter knaptryk og som sikkerhedsnet hvert 5. sekund mens der spilles.
+///
+/// Koder fra Spotify.sdef: player state pPlS, player position pPos, current track pTrk,
+/// name pnam, artist pArt, album pAlb, duration pDur (ms), artwork url aUrl, id "ID  ";
+/// playpause spfy/PlPs, next track spfy/Next, previous track spfy/Prev.
 final class SpotifySource: PlayerAppSource {
     private let covers = ArtworkCache(capacity: 5)
 
-    init() { super.init(bundleID: NowPlaying.BundleID.spotify, shortName: "spotify") }
+    init() { super.init(bundleID: NowPlaying.BundleID.spotify, shortName: "spotify", displayName: "Spotify") }
 
     override var notificationName: Notification.Name { Notification.Name("com.spotify.client.PlaybackStateChanged") }
 
@@ -50,6 +54,34 @@ final class SpotifySource: PlayerAppSource {
         """)
 
     override var statusScript: String { Self.statusScriptSource }
+
+    override var statusFetch: @Sendable (AETarget) throws(ScriptError) -> ScriptValue { Self.fetchStatus }
+
+    /// Samme liste som status-scriptet: `{state, name, artist, album, duration(ms), position, artwork url, id}`.
+    nonisolated static func fetchStatus(_ t: AETarget) throws(ScriptError) -> ScriptValue {
+        let state = try t.get(AE.prop("pPlS"))
+        if PlayerStatus.state(from: state.string) == .stopped { return .list([.text("stopped")]) }
+        let track = AE.prop("pTrk")
+        let position = try t.get(AE.prop("pPos"), or: .missing)
+        return .list([
+            state,
+            try t.get(AE.prop("pnam", of: track), or: .text("")),
+            try t.get(AE.prop("pArt", of: track), or: .text("")),
+            try t.get(AE.prop("pAlb", of: track), or: .text("")),
+            try t.get(AE.prop("pDur", of: track), or: .number(0)),
+            position,
+            try t.get(AE.prop("aUrl", of: track), or: .text("")),
+            try t.get(AE.prop("ID  ", of: track), or: .text("")),
+        ])
+    }
+
+    override func commandEvent(_ command: PlayerCommand) -> (String, String) {
+        switch command {
+        case .playPause: ("spfy", "PlPs")
+        case .next: ("spfy", "Next")
+        case .previous: ("spfy", "Prev")
+        }
+    }
 
     override func commandScript(_ command: PlayerCommand) -> String {
         let verb = switch command {

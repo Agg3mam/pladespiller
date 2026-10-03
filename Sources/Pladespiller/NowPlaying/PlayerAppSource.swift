@@ -1,7 +1,7 @@
 import AppKit
 
-/// Tilstand som en musik-app rapporterer den (fra AppleScript eller en notifikation).
-struct PlayerStatus: Equatable, Sendable {
+/// Tilstand som en musik-app rapporterer den (fra Apple Events eller en notifikation).
+nonisolated struct PlayerStatus: Equatable, Sendable {
     enum State: Sendable { case playing, paused, stopped }
 
     var state: State
@@ -10,7 +10,7 @@ struct PlayerStatus: Equatable, Sendable {
     var album = ""
     var duration: TimeInterval = 0        // sekunder, 0 = ukendt (fx radio)
     var position: TimeInterval?           // sekunder, nil = ukendt
-    var trackID = ""                      // Spotify: spotify:track:…, Musik: persistent ID (hex)
+    var trackID = ""                      // Spotify: spotify:track:…, Musik: persistent ID (hex) [+ "|stream-titel"]
     var artworkURL: String?               // Spotify
     var artworkCount: Int?                // Musik
 
@@ -18,7 +18,8 @@ struct PlayerStatus: Equatable, Sendable {
     var identity: String { trackID.isEmpty ? "\(title)|\(artist)|\(album)" : trackID }
 
     static func state(from text: String?) -> State? {
-        // Hvis appens ordbog ikke er tilgængelig, kommer konstanten rå: «constant ****kPSP».
+        // Apple Events giver rå koder (kPSP = playing, kPSp = paused, kPSS = stopped, kPSF/kPSR = spol);
+        // AppleScript kan give «constant ****kPSP».
         if let t = text {
             if t.contains("kPSP") || t.contains("kPSF") || t.contains("kPSR") { return .playing }
             if t.contains("kPSp") { return .paused }
@@ -33,7 +34,7 @@ struct PlayerStatus: Equatable, Sendable {
     }
 }
 
-/// Resultat af et status-script.
+/// Resultat af en statusforespørgsel.
 enum StatusResult: Equatable {
     case notRunning
     case status(PlayerStatus)   // state == .stopped betyder "intet spiller"
@@ -43,32 +44,44 @@ enum StatusResult: Equatable {
 /// Resultat af at hente et cover.
 enum ArtworkResult {
     case image(NSImage)
-    case none          // sangen har ikke noget cover
+    case none          // sangen har ikke noget cover (huskes, så der ikke spørges igen)
     case notYet        // mangler oplysninger (fx artwork url) — prøv igen ved næste status
 }
 
 /// Fælles logik for Spotify og Musik: notifikationer, sikkerhedsnet-tjek, app-start/-luk,
-/// AppleScript væk fra main thread, cover og valg af hvornår `onChange` kaldes.
+/// tilladelse (TCC), Apple Events væk fra main thread, cover og hvornår `onChange` kaldes.
 ///
-/// Underklasser leverer scripts og parsning.
-class PlayerAppSource: NowPlayingSource {
+/// Underklasser leverer Apple Events (og AppleScript-reserven) og parsning.
+class PlayerAppSource: NowPlayingSource, AccessReporting {
     let bundleID: String
     let shortName: String
+    let displayName: String
     private(set) var current: NowPlaying?
     private(set) var lastChange = Date.distantPast
     var onChange: (() -> Void)?
 
+    /// Sat når macOS ikke (endnu) tillader os at styre appen. Kun mens appen kører.
+    private(set) var accessProblem: SourceAccessProblem?
+
     /// Sikkerhedsnet: tjek så ofte mens der spilles (aldrig ellers).
     var pollInterval: TimeInterval = 5
+
+    /// Reserve: brug NSAppleScript i stedet for pid-adresserede Apple Events.
+    static let useAppleScript = CommandLine.arguments.contains("--applescript")
+        || ProcessInfo.processInfo.environment["PLADESPILLER_APPLESCRIPT"] == "1"
 
     // MARK: Til underklasser
 
     var notificationName: Notification.Name { fatalError("override") }
+    /// Henter status som en liste (samme form som AppleScript-reserven, så parseren er fælles). Kører på køen.
+    var statusFetch: @Sendable (AETarget) throws(ScriptError) -> ScriptValue { fatalError("override") }
     var statusScript: String { fatalError("override") }
+    /// (event-klasse, event-id) for en kommando, fx ("spfy", "PlPs").
+    func commandEvent(_ command: PlayerCommand) -> (String, String) { fatalError("override") }
     func commandScript(_ command: PlayerCommand) -> String { fatalError("override") }
     func parseStatus(_ value: ScriptValue) -> StatusResult { fatalError("override") }
     func parseNotification(_ info: [AnyHashable: Any]) -> PlayerStatus? { nil }
-    /// Skal der hentes via AppleScript efter denne notifikation?
+    /// Skal der hentes status efter denne notifikation?
     func needsFetch(after notified: PlayerStatus, previous: PlayerStatus?, hasArtwork: Bool) -> Bool { true }
     func loadArtwork(for status: PlayerStatus) async -> ArtworkResult { .none }
 
@@ -81,28 +94,34 @@ class PlayerAppSource: NowPlayingSource {
     private var artworkLoadingID: String?
     private var started = false
     private var pollTimer: Timer?
-    private var observers: [(NotificationCenter, NSObjectProtocol)] = []
-    private var notificationGeneration = 0
+    private var accessTimer: Timer?
+    private var workspaceObservers: [NSObjectProtocol] = []
+    private var distributedObserver: DistributedObserver?
+    /// Tælles op ved hver notifikation og kommando; et statussvar der blev startet før, er forældet.
+    private var stateGeneration = 0
     private var fetchInFlight = false
     private var fetchPending = false
-    private var deniedUntil: Date?
+    private var access: AccessState?
 
-    init(bundleID: String, shortName: String) {
+    init(bundleID: String, shortName: String, displayName: String) {
         self.bundleID = bundleID
         self.shortName = shortName
+        self.displayName = displayName
     }
 
-    var isAppRunning: Bool {
-        NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).contains { !$0.isTerminated }
+    var runningPID: pid_t? {
+        NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first { !$0.isTerminated }?.processIdentifier
     }
+
+    var isAppRunning: Bool { runningPID != nil }
 
     func start() {
         guard !started else { return }
         started = true
-        let dnc = DistributedNotificationCenter.default()
-        let o1 = dnc.addObserver(forName: notificationName, object: nil, queue: .main) { [weak self] note in
-            nonisolated(unsafe) let info = note.userInfo   // køen er .main, så den krydser ikke tråde
-            MainActor.assumeIsolated { self?.handleNotification(info) }
+        // `.deliverImmediately`: appen er aldrig aktiv (LSUIElement + ikke-aktiverende panel), og
+        // NSApplication suspenderer distribuerede notifikationer for inaktive apps.
+        distributedObserver = DistributedObserver(name: notificationName) { [weak self] info in
+            self?.handleNotification(info)
         }
         let ws = NSWorkspace.shared.notificationCenter
         let o2 = ws.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { [weak self] note in
@@ -113,7 +132,7 @@ class PlayerAppSource: NowPlayingSource {
             let id = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.bundleIdentifier
             MainActor.assumeIsolated { if id == self?.bundleID { self?.appTerminated() } }
         }
-        observers = [(dnc, o1), (ws, o2), (ws, o3)]
+        workspaceObservers = [o2, o3]
         if isAppRunning {
             NowPlayingLog.log("[\(shortName)] kører ved start – henter status")
             requestFetch(reason: "start")
@@ -124,10 +143,13 @@ class PlayerAppSource: NowPlayingSource {
 
     func stop() {
         started = false
-        for (center, o) in observers { center.removeObserver(o) }
-        observers = []
+        distributedObserver = nil
+        for o in workspaceObservers { NSWorkspace.shared.notificationCenter.removeObserver(o) }
+        workspaceObservers = []
         pollTimer?.invalidate()
         pollTimer = nil
+        accessTimer?.invalidate()
+        accessTimer = nil
     }
 
     func playPause() { send(.playPause) }
@@ -137,7 +159,7 @@ class PlayerAppSource: NowPlayingSource {
     // MARK: Hændelser
 
     private func handleNotification(_ info: [AnyHashable: Any]?) {
-        notificationGeneration += 1
+        stateGeneration += 1
         let parsed = info.flatMap { parseNotification($0) }
         if let p = parsed {
             NowPlayingLog.log("[\(shortName)] notifikation: \(p.state) “\(p.title)” – \(p.artist)"
@@ -156,58 +178,143 @@ class PlayerAppSource: NowPlayingSource {
         }
         apply(p, measuredAt: .now)
         if p.state != .stopped, needsFetch(after: p, previous: previous, hasArtwork: hasArtwork) {
-            requestFetch(reason: "notifikation", delay: 0.15)
+            requestFetch(reason: "notifikation", delay: 0.1)
         }
     }
 
     private func appLaunched() {
-        // Intet AppleScript her: appen spiller ikke lige efter start, og notifikationen kommer,
-        // når den begynder. Så får brugeren først tilladelsesvinduet, når der faktisk spilles.
+        // Intet Apple Event her: appen spiller ikke lige efter start, og notifikationen kommer,
+        // når den begynder.
         NowPlayingLog.log("[\(shortName)] app startet")
     }
 
     private func appTerminated() {
         NowPlayingLog.log("[\(shortName)] app lukket")
         fetchPending = false
+        access = nil
+        accessTimer?.invalidate()
+        accessTimer = nil
+        setAccessProblem(nil)
         apply(nil, measuredAt: .now)
     }
 
-    // MARK: AppleScript
+    // MARK: Tilladelse (TCC)
 
-    /// Henter status via AppleScript (aldrig hvis appen ikke kører; højst ét kald ad gangen).
+    /// Tjekker/indhenter tilladelse før første kald. Returnerer true, hvis der må sendes.
+    private func ensureAccess() async -> Bool {
+        if Self.useAppleScript || access == .granted { return true }
+        guard let pid = runningPID else { return false }
+        let check = await AppleEventQueue.shared.run(pid: pid) { t in t.permission(ask: false) }
+        var state = (try? check.result.get()) ?? .unknown(-1)
+        if state == .notDetermined {
+            NowPlayingLog.log("[\(shortName)] tilladelse: ikke spurgt endnu – macOS spørger nu")
+            setAccessProblem("Tillad Pladespiller at styre \(displayName) i vinduet fra macOS")
+            let asked = await AppleEventQueue.shared.run(pid: pid) { t in t.permission(ask: true) }
+            state = (try? asked.result.get()) ?? .unknown(-1)
+        }
+        return handleAccess(state)
+    }
+
+    @discardableResult
+    private func handleAccess(_ state: AccessState) -> Bool {
+        let changed = access != state
+        access = state
+        switch state {
+        case .granted:
+            if changed { NowPlayingLog.log("[\(shortName)] tilladelse: givet") }
+            accessTimer?.invalidate()
+            accessTimer = nil
+            setAccessProblem(nil)
+            return true
+        case .denied:
+            if changed {
+                NowPlayingLog.log("[\(shortName)] tilladelse: AFVIST – bruger kun notifikationer; tjekker igen hvert 10. s (uden vindue)")
+            }
+            setAccessProblem("Giv Pladespiller adgang til \(displayName) i Systemindstillinger ▸ Anonymitet og sikkerhed ▸ Automatisering")
+            startAccessTimer()
+            return false
+        case .notDetermined:
+            setAccessProblem("Tillad Pladespiller at styre \(displayName) i vinduet fra macOS")
+            startAccessTimer()
+            return false
+        case .notRunning:
+            return false
+        case .unknown(let code):
+            NowPlayingLog.log("[\(shortName)] tilladelse: ukendt svar \(code) – prøver alligevel")
+            access = nil
+            return true
+        }
+    }
+
+    /// Mens adgangen mangler: spørg TCC (uden vindue) hvert 10. s, så beskeden forsvinder,
+    /// når brugeren har givet lov i Systemindstillinger.
+    private func startAccessTimer() {
+        guard accessTimer == nil else { return }
+        let t = Timer(timeInterval: 10, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let pid = self.runningPID else { return }
+                Task {
+                    let check = await AppleEventQueue.shared.run(pid: pid) { t in t.permission(ask: false) }
+                    if case .success(let s) = check.result, s == .granted {
+                        self.handleAccess(.granted)
+                        self.requestFetch(reason: "adgang givet")
+                    }
+                }
+            }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        accessTimer = t
+    }
+
+    private func setAccessProblem(_ message: String?) {
+        let p = message.map { SourceAccessProblem(bundleID: bundleID, message: $0) }
+        guard p != accessProblem else { return }
+        accessProblem = p
+        onChange?()
+    }
+
+    // MARK: Status
+
+    /// Henter status (aldrig hvis appen ikke kører; højst ét kald ad gangen).
     func requestFetch(reason: String, delay: TimeInterval = 0) {
         guard started, isAppRunning else { return }
-        if let until = deniedUntil, until > .now { return }
         if fetchInFlight { fetchPending = true; return }
         fetchInFlight = true
-        let generation = notificationGeneration
         Task {
             if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
             defer {
                 self.fetchInFlight = false
                 if self.fetchPending { self.fetchPending = false; self.requestFetch(reason: "afventende") }
             }
-            guard self.started, self.isAppRunning else { return }
-            let outcome = await AppleScriptRunner.shared.run(self.statusScript)
-            self.handle(outcome, reason: reason, staleIfNotifiedSince: generation)
+            guard self.started, await self.ensureAccess() else { return }
+            let generation = self.stateGeneration
+            guard let outcome = await self.runStatus() else { return }
+            self.handle(outcome, reason: reason, staleIfChangedSince: generation)
         }
     }
 
-    private func handle(_ outcome: ScriptOutcome, reason: String, staleIfNotifiedSince generation: Int) {
+    private func runStatus() async -> Timed<ScriptValue>? {
+        if Self.useAppleScript { return await AppleScriptRunner.shared.run(statusScript) }
+        guard let pid = runningPID else { return nil }
+        return await AppleEventQueue.shared.run(pid: pid, statusFetch)
+    }
+
+    private func handle(_ outcome: Timed<ScriptValue>, reason: String, staleIfChangedSince generation: Int) {
         switch outcome.result {
         case .failure(let e):
             if e.isNotAuthorized {
-                deniedUntil = Date.now.addingTimeInterval(60)
-                NowPlayingLog.log("[\(shortName)] INGEN TILLADELSE til at styre appen (Systemindstillinger › Anonymitet og sikkerhed › Automatisering). Bruger kun notifikationer; prøver igen om 60 s.")
+                handleAccess(.denied)
+            } else if e.needsConsent {
+                handleAccess(.notDetermined)
             } else if e.isAppGone {
                 NowPlayingLog.log("[\(shortName)] appen forsvandt under kaldet")
             } else {
                 NowPlayingLog.log("[\(shortName)] \(e) (\(outcome.milliseconds) ms)")
             }
         case .success(let value):
-            deniedUntil = nil
+            if Self.useAppleScript { handleAccess(.granted) }
             let parsed = parseStatus(value)
-            NowPlayingLog.log("[\(shortName)] AppleScript (\(reason)) \(outcome.milliseconds) ms: \(describe(parsed))")
+            NowPlayingLog.log("[\(shortName)] status (\(reason)) \(outcome.milliseconds) ms: \(describe(parsed))")
             guard started else { return }
             switch parsed {
             case .notRunning:
@@ -215,8 +322,8 @@ class PlayerAppSource: NowPlayingSource {
             case .unreadable:
                 break
             case .status(let s):
-                if generation != notificationGeneration {
-                    // En notifikation kom imens; den er nyere. Brug kun ekstra felter (cover-url m.m.).
+                if generation != stateGeneration {
+                    // En notifikation/kommando kom imens; den er nyere. Brug kun ekstra felter (cover-url m.m.).
                     mergeExtras(from: s)
                 } else {
                     apply(s, measuredAt: outcome.measuredAt)
@@ -236,21 +343,50 @@ class PlayerAppSource: NowPlayingSource {
         }
     }
 
+    // MARK: Kommandoer
+
     private func send(_ command: PlayerCommand) {
-        guard isAppRunning else {
+        guard let pid = runningPID else {
             NowPlayingLog.log("[\(shortName)] \(command.rawValue): appen kører ikke – sender intet")
             return
         }
+        if access == .denied {
+            NowPlayingLog.log("[\(shortName)] \(command.rawValue): ingen tilladelse – sender intet")
+            return
+        }
+        stateGeneration += 1
+        if command == .playPause { applyOptimisticToggle() }
+        let (cls, id) = commandEvent(command)
         let script = commandScript(command)
         Task {
-            let outcome = await AppleScriptRunner.shared.run(script)
+            guard await self.ensureAccess() else { return }
+            let outcome: Timed<ScriptValue>
+            if Self.useAppleScript {
+                outcome = await AppleScriptRunner.shared.run(script)
+            } else {
+                outcome = await AppleEventQueue.shared.run(pid: pid) { t throws(ScriptError) in try t.send(cls, id) }
+            }
             switch outcome.result {
             case .success: NowPlayingLog.log("[\(self.shortName)] sendt \(command.rawValue) (\(outcome.milliseconds) ms)")
-            case .failure(let e): NowPlayingLog.log("[\(self.shortName)] \(command.rawValue) fejlede: \(e)")
+            case .failure(let e):
+                NowPlayingLog.log("[\(self.shortName)] \(command.rawValue) fejlede: \(e)")
+                if e.isNotAuthorized { self.handleAccess(.denied) }
             }
-            try? await Task.sleep(for: .milliseconds(350))
+            // Bekræft hurtigt (notifikationen kommer som regel endnu før).
+            try? await Task.sleep(for: .milliseconds(150))
             self.requestFetch(reason: "efter \(command.rawValue)")
         }
+    }
+
+    /// Optimistisk: vis afspil/pause med det samme; rettes af notifikationen/statussvaret.
+    func applyOptimisticToggle(at date: Date = .now) {
+        guard var np = current else { return }
+        np.position = np.position(at: date)
+        np.positionTimestamp = date
+        np.isPlaying.toggle()
+        set(np, significant: true)
+        if var s = status { s.state = np.isPlaying ? .playing : .paused; s.position = np.position; status = s }
+        updatePolling()
     }
 
     // MARK: Opdatering af `current`
@@ -310,12 +446,16 @@ class PlayerAppSource: NowPlayingSource {
         onChange?()
     }
 
+    /// Antal gange et cover er forsøgt hentet (til selvtesten: samme sang må kun spørges én gang).
+    private(set) var artworkRequests = 0
+
     private func ensureArtwork(for s: PlayerStatus) {
         let id = s.identity
         guard artwork?.id != id, artworkLoadingID != id else { return }
         artworkLoadingID = id
         let t0 = Date()
         Task {
+            self.artworkRequests += 1
             let result = await self.loadArtwork(for: s)
             if self.artworkLoadingID == id { self.artworkLoadingID = nil }
             guard self.status?.identity == id else { return }
@@ -325,7 +465,7 @@ class PlayerAppSource: NowPlayingSource {
             case .none: image = nil
             case .image(let i): image = i
             }
-            self.artwork = (id, image)
+            self.artwork = (id, image)       // også "intet cover" huskes for sangen
             let ms = Int(Date().timeIntervalSince(t0) * 1000)
             NowPlayingLog.log("[\(self.shortName)] cover: " + (image.map { "\(Self.pixelSize($0)) (\(ms) ms)" } ?? "intet"))
             if var np = self.current, np.artwork !== image {
@@ -357,6 +497,33 @@ class PlayerAppSource: NowPlayingSource {
         } else if !shouldPoll, let t = pollTimer {
             t.invalidate()
             pollTimer = nil
+        }
+    }
+}
+
+/// Lytter på en distribueret notifikation med `.deliverImmediately` (den blok-baserede
+/// `addObserver(forName:…)` har ingen `suspensionBehavior` og bliver holdt tilbage, mens appen er inaktiv).
+/// Afmelder sig selv, når den frigives.
+final class DistributedObserver: NSObject {
+    private let handler: ([AnyHashable: Any]?) -> Void
+
+    init(name: Notification.Name, handler: @escaping ([AnyHashable: Any]?) -> Void) {
+        self.handler = handler
+        super.init()
+        DistributedNotificationCenter.default().addObserver(self, selector: #selector(received(_:)), name: name,
+                                                            object: nil, suspensionBehavior: .deliverImmediately)
+    }
+
+    isolated deinit {
+        DistributedNotificationCenter.default().removeObserver(self)
+    }
+
+    @objc nonisolated private func received(_ note: Notification) {
+        nonisolated(unsafe) let info = note.userInfo
+        if Thread.isMainThread {
+            MainActor.assumeIsolated { handler(info) }
+        } else {
+            DispatchQueue.main.async { MainActor.assumeIsolated { self.handler(info) } }
         }
     }
 }

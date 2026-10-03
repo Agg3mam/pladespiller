@@ -69,9 +69,40 @@ enum NowPlayingSelfTest {
         list.insert(NSAppleEventDescriptor(string: "playing"), at: 1)
         list.insert(NSAppleEventDescriptor(int32: 42), at: 2)
         list.insert(NSAppleEventDescriptor(double: 1.5), at: 3)
-        list.insert(NSAppleEventDescriptor(typeCode: AppleScriptRunner.fcc("msng")), at: 4)
-        expect(AppleScriptRunner.value(from: list) == .list([.text("playing"), .number(42), .number(1.5), .missing]),
-               "Descriptor → ScriptValue")
+        list.insert(NSAppleEventDescriptor(typeCode: AE.fcc("msng")), at: 4)
+        list.insert(NSAppleEventDescriptor(enumCode: AE.fcc("kPSp")), at: 5)
+        expect(AE.value(from: list) == .list([.text("playing"), .number(42), .number(1.5), .missing, .text("kPSp")]),
+               "Descriptor → ScriptValue (inkl. missing value og rå enum-kode)")
+        expect(PlayerStatus.state(from: AE.value(from: NSAppleEventDescriptor(enumCode: AE.fcc("kPSP"))).string) == .playing
+               && PlayerStatus.state(from: "kPSS") == .stopped, "Rå player state-koder")
+
+        // Object specifiers: samme struktur som AppleScript selv bygger (`a reference to` sender intet event).
+        let mine = AE.prop("pRaw", of: AE.element("cArt", 1, of: AE.prop("pTrk")))
+        if let ref = NSAppleScript(source: "return a reference to «class pRaw» of «class cArt» 1 of «class pTrk»")?
+            .executeAndReturnError(nil) {
+            expect(specifierShape(mine) == specifierShape(ref),
+                   "Object specifier = AppleScripts (\(specifierShape(mine).joined(separator: " ← ")) / \(specifierShape(ref).joined(separator: " ← ")))")
+        } else {
+            expect(false, "Object specifier: kunne ikke lave AppleScript-reference")
+        }
+        expect(AE.app.descriptorType == AE.fcc("null"), "Rod-specifier er null (= appen)")
+
+        // A1: radio/stream – cover-svaret matches på persistent ID før "|", og "intet cover" huskes
+        expect(MusicSource.basePersistentID("AAAA|Kunstner X - Sang Y") == "AAAA" && MusicSource.basePersistentID("BBBB") == "BBBB",
+               "Persistent ID uden stream-titel")
+        expect(MusicSource.artworkAnswer(.list([.text("AAAA"), .data(Data([9]))]), for: "AAAA|Kunstner X - Sang Y") == .data(Data([9])),
+               "Radio: cover-svar matcher “pid|stream”")
+        expect(MusicSource.artworkAnswer(.list([.text("AAAA"), .missing]), for: "AAAA|S") == .noArtwork, "Radio uden cover → intet cover")
+        expect(MusicSource.artworkAnswer(.list([.text("CCCC"), .data(Data([9]))]), for: "AAAA|S") == .otherTrack, "Andet nummer → kasseres")
+        expect(MusicSource.artworkAnswer(.list([.missing, .missing]), for: "AAAA") == .noArtwork, "Ukendt pid uden data → intet cover")
+        let counting = CountingArtworkSource()
+        let radioStatus = PlayerStatus(state: .playing, title: "Sang Y", artist: "Kunstner X", album: "P6 Beat",
+                                       position: 1, trackID: "AAAA|Kunstner X - Sang Y", artworkCount: 0)
+        for i in 0..<5 {
+            counting.apply(radioStatus, measuredAt: Date().addingTimeInterval(Double(i)))
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        }
+        expect(counting.loads == 1 && counting.current?.artwork == nil, "Intet cover huskes: kun ét cover-kald for samme sang (\(counting.loads))")
 
         // Scripts starter aldrig appen
         for (name, src) in [("Spotify status", SpotifySource.statusScriptSource), ("Musik status", MusicSource.statusScriptSource),
@@ -108,6 +139,14 @@ enum NowPlayingSelfTest {
         src.apply(p, measuredAt: t0.addingTimeInterval(5))   // fx Musik-notifikation uden position
         expect(src.current?.isPlaying == false && abs((src.current?.position ?? 0) - 105) < 0.001,
                "Pause uden position: position forudsiges")
+        src.apply(s, measuredAt: t0)
+        let beforeToggle = changes
+        src.applyOptimisticToggle(at: t0.addingTimeInterval(1))
+        expect(src.current?.isPlaying == false && changes == beforeToggle + 1
+               && abs((src.current?.position(at: t0.addingTimeInterval(9)) ?? 0) - 101) < 0.001,
+               "Optimistisk pause: med det samme, position fryses")
+        src.apply(s, measuredAt: t0.addingTimeInterval(1.2))   // svaret: spiller stadig → rettes
+        expect(src.current?.isPlaying == true, "Optimistisk tilstand rettes af svaret")
         src.apply(PlayerStatus(state: .stopped), measuredAt: .now)
         expect(src.current == nil, "Stoppet → intet spiller")
 
@@ -123,6 +162,12 @@ enum NowPlayingSelfTest {
         expect(store.current?.sourceAppBundleID == "b", "Ingen spiller → den senest ændrede (på pause)")
         a.clear(); b.clear()
         expect(store.current == nil, "Ingen sange → nil")
+        a.problem = SourceAccessProblem(bundleID: "a", message: "Giv adgang til a")
+        a.clear()
+        expect(store.accessProblem?.bundleID == "a", "accessProblem sættes fra kilden")
+        a.problem = nil
+        a.clear()
+        expect(store.accessProblem == nil, "accessProblem ryddes igen")
 
         // Cover-cache (LRU)
         let cache = ArtworkCache(capacity: 3)
@@ -135,7 +180,35 @@ enum NowPlayingSelfTest {
         return failures == 0
     }
 
-    private final class FakeSource: NowPlayingSource {
+    /// Kæden af (form:want:seld) fra yderst til rod, fx ["prop:prop:pRaw", "indx:cArt:1", "prop:prop:pTrk"].
+    private static func specifierShape(_ d: NSAppleEventDescriptor) -> [String] {
+        var out: [String] = []
+        var cur: NSAppleEventDescriptor? = d
+        while let c = cur, c.descriptorType == AE.fcc("obj ") {
+            let form = c.forKeyword(AE.fcc("form")).map { AE.fourCCString($0.enumCodeValue) } ?? "?"
+            let want = c.forKeyword(AE.fcc("want")).map { AE.fourCCString($0.typeCodeValue) } ?? "?"
+            let seldDesc = c.forKeyword(AE.fcc("seld"))
+            let seld = seldDesc.map { $0.descriptorType == AE.fcc("long") ? "\($0.int32Value)" : AE.fourCCString($0.typeCodeValue) } ?? "?"
+            out.append("\(form):\(want):\(seld)")
+            cur = c.forKeyword(AE.fcc("from"))
+        }
+        // AppleScript uden tell-blok har ikke appen som rod; sidste led er derfor en ren type (pTrk).
+        if let root = cur, root.descriptorType == AE.fcc("type") { out.append("prop:prop:\(AE.fourCCString(root.typeCodeValue))") }
+        return out
+    }
+
+    private final class CountingArtworkSource: PlayerAppSource {
+        var loads = 0
+        init() { super.init(bundleID: "test.counting", shortName: "test", displayName: "Test") }
+        override func loadArtwork(for status: PlayerStatus) async -> ArtworkResult {
+            loads += 1
+            return .none
+        }
+    }
+
+    private final class FakeSource: NowPlayingSource, AccessReporting {
+        var problem: SourceAccessProblem?
+        var accessProblem: SourceAccessProblem? { problem }
         let bundleID: String
         private(set) var current: NowPlaying?
         private(set) var lastChange = Date.distantPast
