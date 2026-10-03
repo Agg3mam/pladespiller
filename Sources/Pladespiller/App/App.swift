@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 import SwiftUI
 
 /// Opstart. Ejes af hovedagenten.
@@ -7,11 +8,16 @@ import SwiftUI
 ///   --mock                    brug testdata (scriptet løkke) i stedet for Spotify/Musik
 ///   --render-snapshots <dir>  tegn visninger til PNG og afslut (Grafik-agenten)
 ///   --nowplaying-log          log det der spiller og afslut aldrig (Musikdata-agenten)
+///   --unregister-login-item   meld "Åbn ved login" fra og afslut (scripts/uninstall.sh)
 ///   --window-selftest [dir]   tjek gitter/placering og tegn skallen til PNG (Vindue-agenten)
 @main
 enum PladespillerMain {
     static func main() {
         let args = CommandLine.arguments
+        if args.contains("--unregister-login-item") {
+            try? SMAppService.mainApp.unregister()
+            exit(0)
+        }
         let mock = args.contains("--mock") || ProcessInfo.processInfo.environment["PLADESPILLER_MOCK"] == "1"
 
         if let i = args.firstIndex(of: "--render-snapshots") {
