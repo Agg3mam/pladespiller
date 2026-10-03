@@ -72,3 +72,7 @@ En agent ændrer kun sine egne filer. Ændringer i fælles filer bestilles hos h
   Hovedagent rettede M9 (AppDelegate-levetid) og M10 (én-kopi-tjek).
 - **2026-10-03 · Træ = rigtigt foto** (brugerens ønske): `Resources/Textures/dark_wood.jpg`, Poly Haven "Dark Wood" 2K, CC0 (se `Resources/Textures/LICENSE.txt`).
   `build.sh` kopierer `Resources/Textures/*` til `Contents/Resources/Textures/` (hovedagenten lavede den lille ændring, da Build-agenten var færdig).
+- **2026-10-03 · Bølge 2: vindue (2321afb) og musik (eec6d25) flettet.** Begge havde lavet en `DistributedObserver` → navnesammenstød;
+  hovedagenten samlede dem i `Shared/DistributedObserver.swift` (init(names:handler:), init(name:handler:), init(names:onChange:)).
+  Musik sender nu rå Apple Events til pid (kan aldrig starte appen); NSAppleScript-reserve med `--applescript`. Log: `--log` → `~/Library/Logs/Pladespiller/nowplaying.log`.
+  Dæmpning: "Automatisk" følger Apples Widgetstil (widgetAppearance 1 = Fuld farve → ingen dæmpning), ellers Finder-reglen.

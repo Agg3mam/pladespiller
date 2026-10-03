@@ -501,33 +501,6 @@ class PlayerAppSource: NowPlayingSource, AccessReporting {
     }
 }
 
-/// Lytter på en distribueret notifikation med `.deliverImmediately` (den blok-baserede
-/// `addObserver(forName:…)` har ingen `suspensionBehavior` og bliver holdt tilbage, mens appen er inaktiv).
-/// Afmelder sig selv, når den frigives.
-final class DistributedObserver: NSObject {
-    private let handler: ([AnyHashable: Any]?) -> Void
-
-    init(name: Notification.Name, handler: @escaping ([AnyHashable: Any]?) -> Void) {
-        self.handler = handler
-        super.init()
-        DistributedNotificationCenter.default().addObserver(self, selector: #selector(received(_:)), name: name,
-                                                            object: nil, suspensionBehavior: .deliverImmediately)
-    }
-
-    isolated deinit {
-        DistributedNotificationCenter.default().removeObserver(self)
-    }
-
-    @objc nonisolated private func received(_ note: Notification) {
-        nonisolated(unsafe) let info = note.userInfo
-        if Thread.isMainThread {
-            MainActor.assumeIsolated { handler(info) }
-        } else {
-            DispatchQueue.main.async { MainActor.assumeIsolated { self.handler(info) } }
-        }
-    }
-}
-
 // MARK: - Hjælpere til notifikationers userInfo
 
 enum UserInfoValue {

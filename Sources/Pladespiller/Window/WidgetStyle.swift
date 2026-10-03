@@ -80,30 +80,6 @@ final class WidgetStyle {
     }
 }
 
-/// Distribuerede notifikationer med `.deliverImmediately` (selector-API'et kræver et NSObject).
-final class DistributedObserver: NSObject {
-    private let onChange: @MainActor () -> Void
-    private let names: [String]
-
-    init(names: [String], onChange: @escaping @MainActor () -> Void) {
-        self.names = names
-        self.onChange = onChange
-        super.init()
-        let dnc = DistributedNotificationCenter.default()
-        for n in names {
-            dnc.addObserver(self, selector: #selector(fired(_:)), name: Notification.Name(n),
-                            object: nil, suspensionBehavior: .deliverImmediately)
-        }
-    }
-
-    deinit { DistributedNotificationCenter.default().removeObserver(self) }
-
-    @objc nonisolated private func fired(_ note: Notification) {
-        let cb = onChange
-        Task { @MainActor in cb() }
-    }
-}
-
 /// KVO på en UserDefaults (`.standard` ser også det globale domæne).
 private final class DefaultsObserver: NSObject {
     nonisolated(unsafe) private let defaults: UserDefaults
