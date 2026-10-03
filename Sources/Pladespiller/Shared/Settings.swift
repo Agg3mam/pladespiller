@@ -47,6 +47,8 @@ final class Settings {
         static let theme = "pladespiller.theme"
         static let colorMode = "pladespiller.colorMode"
         static let positionLocked = "pladespiller.positionLocked"
+        /// Skærmen widgetten sidst stod på (stabilt skærm-id).
+        static let lastScreenID = "pladespiller.lastScreenID"
         /// Placering pr. skærm: `placement.<skærm-id>` → `"x,y"` (vinduets nederste venstre hjørne, skærmkoordinater).
         static func placement(screenID: String) -> String { "pladespiller.placement.\(screenID)" }
     }
@@ -64,6 +66,7 @@ final class Settings {
     var theme: TurntableTheme { didSet { defaults.set(theme.rawValue, forKey: Key.theme) } }
     var colorMode: ColorMode { didSet { defaults.set(colorMode.rawValue, forKey: Key.colorMode) } }
     var positionLocked: Bool { didSet { defaults.set(positionLocked, forKey: Key.positionLocked) } }
+    var lastScreenID: String? { didSet { defaults.set(lastScreenID, forKey: Key.lastScreenID) } }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -71,6 +74,7 @@ final class Settings {
         theme = defaults.string(forKey: Key.theme).flatMap(TurntableTheme.init) ?? Default.theme
         colorMode = defaults.string(forKey: Key.colorMode).flatMap(ColorMode.init) ?? Default.colorMode
         positionLocked = defaults.object(forKey: Key.positionLocked) as? Bool ?? Default.positionLocked
+        lastScreenID = defaults.string(forKey: Key.lastScreenID)
     }
 
     func savedOrigin(screenID: String) -> CGPoint? {

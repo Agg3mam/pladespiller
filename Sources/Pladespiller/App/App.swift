@@ -7,6 +7,7 @@ import SwiftUI
 ///   --mock                    brug testdata (scriptet løkke) i stedet for Spotify/Musik
 ///   --render-snapshots <dir>  tegn visninger til PNG og afslut (Grafik-agenten)
 ///   --nowplaying-log          log det der spiller og afslut aldrig (Musikdata-agenten)
+///   --window-selftest [dir]   tjek gitter/placering og tegn skallen til PNG (Vindue-agenten)
 @main
 enum PladespillerMain {
     static func main() {
@@ -20,6 +21,10 @@ enum PladespillerMain {
         }
         if args.contains("--nowplaying-log") {
             NowPlayingDebugCLI.run(mock: mock)
+        }
+        if let i = args.firstIndex(of: "--window-selftest") {
+            let dir = args.indices.contains(i + 1) ? args[i + 1] : nil
+            exit(Int32(WindowSelfTest.run(outputDirectory: dir.map { URL(fileURLWithPath: $0) })))
         }
 
         // Kun én kopi ad gangen.

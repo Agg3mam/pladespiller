@@ -33,6 +33,7 @@ enum WidgetMetrics {
 
     // Træk
     static let dragThreshold: CGFloat = 4
+    static let snapDuration: TimeInterval = 0.28
 
     // Pladespiller-bevægelse
     static let secondsPerRevolution: TimeInterval = 1.8   // 33⅓ o/min
