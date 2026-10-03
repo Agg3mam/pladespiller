@@ -58,3 +58,10 @@ En agent ændrer kun sine egne filer. Ændringer i fælles filer bestilles hos h
   uigennemsigtige selvom systemet er i lys tilstand.
 - **2026-10-03 · Vinduesniveau** `desktopIconWindow + 2` = samme lag som Apples widgets. Bekræftet med CGWindowList.
 - **2026-10-03 · Standardtema** Træ (foreløbig, skal bekræftes af brugeren).
+- **2026-10-03 · Bølge 1 flettet** (build de63705, vindue 62a066c, musik 4f26b52, grafik c15572d).
+  - Signering: selvsigneret "Pladespiller Local Signing" i egen nøglering (`scripts/setup-signing.sh` / `remove-signing.sh`); DR = certificate leaf, stabil mellem builds. Ingen hardened runtime.
+  - Look: uigennemsigtig flade + lys kant, fordi brugerens Ikon- og widgetstil = Mørk (`AppleIconAppearanceTheme=RegularDark`); Liquid Glass (`.glassEffect(.clear)`) kun ved Klar/Tonet. `WidgetStyle` følger ændringer.
+  - Gitter: flugter med nærmeste Apple-widget (kanter + k·180), ellers gitter fra det synlige områdes øverste venstre hjørne; aldrig overlap med Apple-widgets.
+  - Træk: `WidgetPanel.sendEvent` med 4 pt-tærskel; `.claimsWidgetDrag()` til indhold der selv vil trække.
+  - Musik: NSAppleScript på én seriel kø, alle scripts bag `if application id … is running`; DistributedNotifications + 5 s sikkerhedsnet kun mens der spilles.
+  - Grafik: Core Animation-lagtræ (`TurntableLayer`); rotation/arm som CA-animationer lagt ind ved tilstandsskift, intet arbejde pr. frame. Sheen er fast lag over rotoren.
