@@ -70,3 +70,5 @@ En agent ændrer kun sine egne filer. Ændringer i fælles filer bestilles hos h
 - **2026-10-03 · Bølge 2-aftaler:** `Shared/WidgetPresentation.swift` (`dimAmount`, `isHovering`, environment `\.widgetPresentation`)
   og `SourceAccessProblem`; `NowPlayingStore.accessProblem`. QA-fejl fra bølge 1 i `qa/bolge1/` fordeles til ejerne.
   Hovedagent rettede M9 (AppDelegate-levetid) og M10 (én-kopi-tjek).
+- **2026-10-03 · Træ = rigtigt foto** (brugerens ønske): `Resources/Textures/dark_wood.jpg`, Poly Haven "Dark Wood" 2K, CC0 (se `Resources/Textures/LICENSE.txt`).
+  `build.sh` kopierer `Resources/Textures/*` til `Contents/Resources/Textures/` (hovedagenten lavede den lille ændring, da Build-agenten var færdig).

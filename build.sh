@@ -58,6 +58,10 @@ if [[ -f Resources/AppIcon.icns ]]; then
 else
   echo "Bemærk: Resources/AppIcon.icns mangler (lav det med: swift scripts/make-icon.swift)."
 fi
+if [[ -d Resources/Textures ]]; then
+  mkdir -p "$APP/Contents/Resources/Textures"
+  cp Resources/Textures/* "$APP/Contents/Resources/Textures/"
+fi
 plutil -lint -s "$APP/Contents/Info.plist" || die "Info.plist er ugyldig."
 
 # --- Signér ------------------------------------------------------------------
