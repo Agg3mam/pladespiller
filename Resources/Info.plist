@@ -8,6 +8,8 @@
 	<string>Pladespiller</string>
 	<key>CFBundleExecutable</key>
 	<string>Pladespiller</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>dk.holgerskov.Pladespiller</string>
 	<key>CFBundleInfoDictionaryVersion</key>
@@ -24,9 +26,9 @@
 	<string>26.0</string>
 	<key>LSUIElement</key>
 	<true/>
-	<key>NSHighResolutionCapable</key>
-	<true/>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Pladespiller læser, hvilken sang der spiller i Spotify og Musik, og sender afspil, pause, næste og forrige til dem.</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
 </dict>
 </plist>
