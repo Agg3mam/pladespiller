@@ -1,8 +1,24 @@
 import AppKit
+import Observation
 import SwiftUI
 
 /// Det kantløse vindue nede på skrivebordet. Ejes af Vindue-agenten.
+///
+/// Træk: `sendEvent(_:)` sender mouseDown og små bevægelser videre til SwiftUI. Først når musen
+/// har flyttet sig mere end `WidgetMetrics.dragThreshold` (og indholdet ikke har gjort krav på
+/// trækket, og placeringen ikke er låst), overtager vinduet: SwiftUI får et "mouseUp langt væk"
+/// (så knapper/tap annulleres), og vinduet flyttes selv. Ingen `isMovableByWindowBackground`.
 final class WidgetPanel: NSPanel {
+    let dragClaim = WidgetDragClaim()
+    var isPositionLocked: () -> Bool = { false }
+    var onDragBegan: () -> Void = {}
+    var onDragMoved: (CGPoint) -> Void = { _ in }   // ny origin (AppKit)
+    var onDragEnded: () -> Void = {}
+
+    private var mouseDownLocation: CGPoint?
+    private var originAtMouseDown: CGPoint = .zero
+    private(set) var isDragging = false
+
     init(size: CGSize) {
         super.init(contentRect: NSRect(origin: .zero, size: size),
                    styleMask: [.borderless, .nonactivatingPanel],
@@ -14,32 +30,254 @@ final class WidgetPanel: NSPanel {
         collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenNone]
         hidesOnDeactivate = false
         isReleasedWhenClosed = false
+        isMovable = false               // vi flytter selv
+        animationBehavior = .none
     }
 
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+
+    override func sendEvent(_ event: NSEvent) {
+        switch event.type {
+        case .leftMouseDown:
+            isDragging = false
+            dragClaim.isClaimed = false
+            mouseDownLocation = NSEvent.mouseLocation
+            originAtMouseDown = frame.origin
+            super.sendEvent(event)
+
+        case .leftMouseDragged:
+            let p = NSEvent.mouseLocation
+            if isDragging {
+                moveWithMouse(p)
+                return
+            }
+            if let start = mouseDownLocation,
+               !dragClaim.isClaimed, !isPositionLocked(),
+               hypot(p.x - start.x, p.y - start.y) > WidgetMetrics.dragThreshold {
+                isDragging = true
+                cancelContentTracking(like: event)
+                onDragBegan()
+                moveWithMouse(p)
+                return
+            }
+            super.sendEvent(event)
+
+        case .leftMouseUp:
+            mouseDownLocation = nil
+            if isDragging {
+                isDragging = false
+                onDragEnded()
+                return
+            }
+            super.sendEvent(event)
+
+        default:
+            super.sendEvent(event)
+        }
+    }
+
+    private func moveWithMouse(_ p: CGPoint) {
+        guard let start = mouseDownLocation else { return }
+        onDragMoved(CGPoint(x: originAtMouseDown.x + p.x - start.x,
+                            y: originAtMouseDown.y + p.y - start.y))
+    }
+
+    /// Afslut SwiftUI's igangværende museforløb med et mouseUp langt uden for vinduet,
+    /// så en knap ikke udløses og en tap-gesture fejler.
+    private func cancelContentTracking(like event: NSEvent) {
+        guard let up = NSEvent.mouseEvent(with: .leftMouseUp,
+                                          location: NSPoint(x: -100_000, y: -100_000),
+                                          modifierFlags: event.modifierFlags,
+                                          timestamp: event.timestamp,
+                                          windowNumber: windowNumber,
+                                          context: nil,
+                                          eventNumber: event.eventNumber,
+                                          clickCount: 1,
+                                          pressure: 0) else { return }
+        super.sendEvent(up)
+    }
 }
 
-/// Opretter panelet og holder SwiftUI-indholdet. Bølge 0: fast placering øverst til venstre.
+/// NSHostingView der tager imod første klik, selvom vinduet aldrig bliver key.
+final class WidgetHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+/// Opretter panelet og holder SwiftUI-indholdet. Står for placering, træk, gitter,
+/// skærmskift og størrelsesskift. Ingen timere: alt sker på hændelser.
 final class WidgetPanelController {
     private let settings: Settings
+    private let style = WidgetStyle()
     private let panel: WidgetPanel
+    private let landing = LandingShadow()
+    private var dragAnchors: [CGRect] = []
+    private var screenObserver: NSObjectProtocol?
+
+    /// Skærmen widgetten sidst blev placeret på af brugeren. Gemmes her (Window-ejet nøgle),
+    /// så gendannelse vælger rigtig skærm, når flere har en gemt placering.
+    private static let lastScreenKey = "pladespiller.window.lastScreen"
+    private var lastScreenID: String? {
+        get { UserDefaults.standard.string(forKey: Self.lastScreenKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.lastScreenKey) }
+    }
 
     init<Content: View>(settings: Settings, @ViewBuilder content: () -> Content) {
         self.settings = settings
         let size = WidgetMetrics.windowSize(for: settings.size)
         panel = WidgetPanel(size: size)
-        let host = NSHostingView(rootView: WidgetChrome(content: content()).environment(settings))
+        let root = WidgetChrome(content: content())
+            .environment(settings)
+            .environment(style)
+            .environment(\.widgetDragClaim, panel.dragClaim)
+        let host = WidgetHostingView(rootView: root)
+        host.sizingOptions = []
         host.frame = NSRect(origin: .zero, size: size)
+        host.autoresizingMask = [.width, .height]
         panel.contentView = host
+
+        panel.isPositionLocked = { [weak settings] in settings?.positionLocked ?? false }
+        panel.onDragBegan = { [weak self] in self?.dragBegan() }
+        panel.onDragMoved = { [weak self] in self?.dragMoved(to: $0) }
+        panel.onDragEnded = { [weak self] in self?.dragEnded() }
+
+        applyAppearance()
+        observeStyle()
+        observeSize()
+        screenObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.placeAfterScreenChange() }
+        }
     }
 
     func show() {
-        if let screen = NSScreen.main {
-            let v = screen.visibleFrame
-            let size = panel.frame.size
-            panel.setFrameOrigin(NSPoint(x: v.minX, y: v.maxY - size.height))
-        }
+        panel.setFrame(restoredFrame(size: panel.frame.size), display: false)
         panel.orderFrontRegardless()
+    }
+
+    // MARK: Udseende
+
+    private func applyAppearance() {
+        panel.appearance = style.nsAppearance
+    }
+
+    private func observeStyle() {
+        withObservationTracking {
+            _ = style.nsAppearance
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                self?.applyAppearance()
+                self?.observeStyle()
+            }
+        }
+    }
+
+    // MARK: Størrelse
+
+    private func observeSize() {
+        withObservationTracking {
+            _ = settings.size
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                self?.sizeChanged()
+                self?.observeSize()
+            }
+        }
+    }
+
+    /// Behold øverste venstre hjørne, ny størrelse, snap igen, gem.
+    private func sizeChanged() {
+        let size = WidgetMetrics.windowSize(for: settings.size)
+        let old = panel.frame
+        guard old.size != size else { return }
+        let wanted = CGRect(x: old.minX, y: old.maxY - size.height, width: size.width, height: size.height)
+        let target = snapped(wanted)
+        panel.setFrame(target, display: true)
+        save(target)
+    }
+
+    // MARK: Træk
+
+    private func dragBegan() {
+        dragAnchors = AppleWidgetWindows.frames()
+        panel.orderFrontRegardless()
+        landing.show(at: snapped(panel.frame, anchors: dragAnchors), below: panel)
+    }
+
+    private func dragMoved(to origin: CGPoint) {
+        panel.setFrameOrigin(origin)
+        landing.move(to: snapped(panel.frame, anchors: dragAnchors))
+    }
+
+    private func dragEnded() {
+        let target = snapped(panel.frame, anchors: dragAnchors)
+        landing.hide()
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.28
+            ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.25, 1)
+            panel.animator().setFrame(target, display: true)
+        }
+        save(target)
+    }
+
+    // MARK: Placering
+
+    private func screen(for frame: CGRect) -> NSScreen? {
+        let screens = NSScreen.screens
+        return GridSnapper.bestScreenIndex(for: frame, visibleFrames: screens.map(\.visibleFrame))
+            .map { screens[$0] }
+    }
+
+    private func snapped(_ frame: CGRect, anchors: [CGRect]? = nil) -> CGRect {
+        guard let screen = screen(for: frame) else { return frame }
+        let visible = screen.visibleFrame
+        let a = anchors ?? AppleWidgetWindows.frames()
+        let start = GridSnapper.clamp(frame, into: visible)
+        return GridSnapper.snap(start, visibleFrame: visible, anchors: a, pitch: WidgetMetrics.gridPitch)
+    }
+
+    private func save(_ frame: CGRect) {
+        guard let screen = screen(for: frame) else { return }
+        let id = screen.stableID
+        settings.saveOrigin(frame.origin, screenID: id)
+        lastScreenID = id
+    }
+
+    /// Gendan: sidste skærm hvis den er tilsluttet, ellers første skærm med en gemt placering,
+    /// ellers øverst til venstre på hovedskærmen (som Apples første widget-gruppe).
+    private func restoredFrame(size: CGSize) -> CGRect {
+        let screens = NSScreen.screens
+        var ordered = screens
+        if let last = lastScreenID, let i = screens.firstIndex(where: { $0.stableID == last }) {
+            ordered.insert(ordered.remove(at: i), at: 0)
+        }
+        for screen in ordered {
+            if let o = settings.savedOrigin(screenID: screen.stableID) {
+                let saved = CGRect(origin: o, size: size)
+                let visible = screen.visibleFrame
+                let start = GridSnapper.clamp(saved, into: visible)
+                return GridSnapper.snap(start, visibleFrame: visible,
+                                        anchors: AppleWidgetWindows.frames(), pitch: WidgetMetrics.gridPitch)
+            }
+        }
+        guard let main = NSScreen.main ?? screens.first else { return CGRect(origin: .zero, size: size) }
+        let v = main.visibleFrame
+        return snapped(CGRect(x: v.minX, y: v.maxY - size.height, width: size.width, height: size.height))
+    }
+
+    /// Skærm til/fra, opløsning, Dock eller menulinje ændret.
+    private func placeAfterScreenChange() {
+        guard !panel.isDragging else { return }
+        let size = panel.frame.size
+        // Kommer den sidst brugte skærm tilbage, går vi tilbage dertil.
+        let target: CGRect
+        if let last = lastScreenID, NSScreen.screens.contains(where: { $0.stableID == last }) {
+            target = restoredFrame(size: size)
+        } else {
+            // Ellers: bliv hvor vi er, hvis det stadig er synligt – ellers nærmeste synlige sted.
+            target = snapped(panel.frame)
+        }
+        if target != panel.frame { panel.setFrame(target, display: true) }
     }
 }
