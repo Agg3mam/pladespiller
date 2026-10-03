@@ -8,6 +8,8 @@ import Observation
 @Observable
 final class NowPlayingStore {
     private(set) var current: NowPlaying?
+    /// Sat når en kilde mangler tilladelse (Apple Events afvist). Udfyldes af Musikdata-agenten.
+    private(set) var accessProblem: SourceAccessProblem?
 
     @ObservationIgnored private let sources: [NowPlayingSource]
     @ObservationIgnored private var active: NowPlayingSource?

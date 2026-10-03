@@ -65,3 +65,8 @@ En agent ændrer kun sine egne filer. Ændringer i fælles filer bestilles hos h
   - Træk: `WidgetPanel.sendEvent` med 4 pt-tærskel; `.claimsWidgetDrag()` til indhold der selv vil trække.
   - Musik: NSAppleScript på én seriel kø, alle scripts bag `if application id … is running`; DistributedNotifications + 5 s sikkerhedsnet kun mens der spilles.
   - Grafik: Core Animation-lagtræ (`TurntableLayer`); rotation/arm som CA-animationer lagt ind ved tilstandsskift, intet arbejde pr. frame. Sheen er fast lag over rotoren.
+- **2026-10-03 · Brugerens valg efter bølge 1:** tema vælges i menuen (standard Træ indtil da); træ = mørkt, realistisk træ (ikke striber);
+  lange titler = **rulletekst**; "forrige" i Musik = som Musik selv (`back track`).
+- **2026-10-03 · Bølge 2-aftaler:** `Shared/WidgetPresentation.swift` (`dimAmount`, `isHovering`, environment `\.widgetPresentation`)
+  og `SourceAccessProblem`; `NowPlayingStore.accessProblem`. QA-fejl fra bølge 1 i `qa/bolge1/` fordeles til ejerne.
+  Hovedagent rettede M9 (AppDelegate-levetid) og M10 (én-kopi-tjek).
