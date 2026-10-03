@@ -81,6 +81,42 @@ enum WindowSelfTest {
         check("TintedAutomatic", WidgetStyle.parse(iconTheme: "TintedAutomatic") == (.glass, nil))
         check("ingen nøgle", WidgetStyle.parse(iconTheme: nil) == (.opaque, nil))
 
+        // 9. Falmet look.
+        typealias D = WidgetDimming
+        check("Fuld farve-stil → aldrig dæmpet", D.target(mode: .automatic, policy: .fullColor, desktopFocused: false) == 0)
+        check("Automatisk, andet program aktivt → dæmpet", D.target(mode: .automatic, policy: .automatic, desktopFocused: false) == 1)
+        check("Automatisk, skrivebord i fokus → fuld farve", D.target(mode: .automatic, policy: .automatic, desktopFocused: true) == 0)
+        check("Altid dæmpet", D.target(mode: .alwaysDimmed, policy: .fullColor, desktopFocused: true) == 1)
+        check("Altid fuld farve", D.target(mode: .alwaysFull, policy: .automatic, desktopFocused: false) == 0)
+        check("widgetAppearance 1 = Fuld farve", D.systemPolicy(widgetAppearance: 1) == .fullColor)
+        check("widgetAppearance ukendt = Automatisk", D.systemPolicy(widgetAppearance: nil) == .automatic)
+
+        // 10. Menu.
+        do {
+            let defaults = UserDefaults(suiteName: "pladespiller.selftest.menu") ?? .standard
+            let settings = Settings(defaults: defaults)
+            settings.size = .large
+            settings.theme = .black
+            let builder = WidgetMenu(settings: settings)   // holder handlingerne (target er svag)
+            let menu = builder.build()
+            let titles = menu.items.map { $0.isSeparatorItem ? "—" : $0.title }
+            print("     menu:", titles.joined(separator: " | "))
+            check("menupunkter", titles == ["Lille", "Mellem", "Stor", "—", "Tema", "Farver", "—",
+                                            "Lås placering", "Åbn ved login", "—", "Fjern widget"], "\(titles)")
+            check("flueben ved Stor", menu.item(withTitle: "Stor")?.state == .on && menu.item(withTitle: "Lille")?.state == .off)
+            let tema = menu.item(withTitle: "Tema")?.submenu
+            check("Tema-undermenu", tema?.items.map(\.title) == ["Træ", "Aluminium", "Sort", "Auto"]
+                  && tema?.item(withTitle: "Sort")?.state == .on)
+            check("Farver-undermenu", menu.item(withTitle: "Farver")?.submenu?.items.map(\.title)
+                  == ["Automatisk", "Altid fuld farve", "Altid dæmpet"])
+            // Vælg "Lille" og "Aluminium" via menuens egne handlinger.
+            if let i = menu.item(withTitle: "Lille") , let a = i.action { _ = (i.target as? NSObject)?.perform(a, with: i) }
+            if let i = tema?.item(withTitle: "Aluminium") , let a = i.action { _ = (i.target as? NSObject)?.perform(a, with: i) }
+            check("menuhandling sætter indstillinger", settings.size == .small && settings.theme == .aluminium)
+            withExtendedLifetime(builder) {}
+            UserDefaults.standard.removePersistentDomain(forName: "pladespiller.selftest.menu")
+        }
+
         let live = WidgetStyle()
         print("     system: AppleIconAppearanceTheme=\(live.iconTheme ?? "–") widgetAppearance=\(live.widgetAppearance.map(String.init) ?? "–") → \(live.material), \(String(describing: live.forcedScheme))")
         print("     Apple-widgets nu:", AppleWidgetWindows.frames())
@@ -94,18 +130,21 @@ enum WindowSelfTest {
     static func renderChrome(to dir: URL) {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let defaults = UserDefaults(suiteName: "pladespiller.selftest") ?? .standard
-        for scheme in [ColorScheme.dark, .light] {
+        for (scheme, dim) in [(ColorScheme.dark, 0.0), (.light, 0.0), (.dark, 1.0)] {
             for size in WidgetSize.allCases {
                 let settings = Settings(defaults: defaults)
                 settings.size = size
+                let presentation = WidgetPresentation()
+                presentation.dimAmount = dim
                 let view = WidgetChrome(content: Color.clear)
                     .environment(settings)
+                    .environment(\.widgetPresentation, presentation)
                     .environment(\.colorScheme, scheme)
                 let r = ImageRenderer(content: view)
                 r.scale = 2
                 guard let cg = r.cgImage else { continue }
                 let rep = NSBitmapImageRep(cgImage: cg)
-                let url = dir.appendingPathComponent("chrome-\(scheme == .dark ? "mork" : "lys")-\(size.rawValue).png")
+                let url = dir.appendingPathComponent("chrome-\(scheme == .dark ? "mork" : "lys")\(dim > 0 ? "-daempet" : "")-\(size.rawValue).png")
                 try? rep.representation(using: .png, properties: [:])?.write(to: url)
                 print("     skrev", url.path)
             }

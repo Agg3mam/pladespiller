@@ -18,7 +18,7 @@ extension NSScreen {
 /// Apples widget-vinduer lige nu (AppKit-koordinater). Læses kun ved behov (træk, placering) –
 /// ingen polling. Kræver ikke skærmoptagelses-tilladelse: vi bruger kun ramme, lag og PID.
 enum AppleWidgetWindows {
-    static let ownerBundleID = "com.apple.notificationcenterui"
+    nonisolated static let ownerBundleID = "com.apple.notificationcenterui"
 
     static func frames() -> [CGRect] {
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],

@@ -1,10 +1,13 @@
+import AppKit
 import SwiftUI
 
 /// Widgettens "skal": baggrund, hjørner og kant. Ejes af Vindue-agenten.
 ///
 /// Matcher brugerens Apple-widgets (målt 2026-10-03, Ikon- og widgetstil = Mørk, fuld farve):
 /// - Flade indrykket 8 pt, radius 28 pt continuous, ingen skygge.
-/// - Uigennemsigtig baggrund. Mørk: svag lodret gradient som Kalender (≈ #262626 → #111111).
+/// - Uigennemsigtig baggrund. Mørk: svag lodret gradient (@2x grå 33 → 13 som Apples Up Next, QA K1).
+/// - Dæmpet (`presentation.dimAmount`): fladen toner ned til `WidgetDimLook.backgroundOpacity` over
+///   sløret skrivebord (NSVisualEffectView bag vinduet); kanten bliver.
 /// - Lys kant der er stærkest på top- og bundkanten og forsvinder ned langs siderne
 ///   (målt på Status, bg 13: yderste px +77, næste +44, tredje +15; midt på siderne: 0).
 /// - Klar/Tonet stil: Liquid Glass i stedet for den uigennemsigtige flade.
@@ -12,6 +15,7 @@ struct WidgetChrome<Content: View>: View {
     @Environment(Settings.self) private var settings
     @Environment(WidgetStyle.self) private var style: WidgetStyle?   // valgfri, så snapshots virker uden
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.widgetPresentation) private var presentation
     let content: Content
 
     var body: some View {
@@ -24,10 +28,21 @@ struct WidgetChrome<Content: View>: View {
                     .clipShape(shape)
                     .glassEffect(.clear, in: shape)
             } else {
+                let dim = presentation.dimAmount
                 content
                     .frame(width: size.width, height: size.height)
-                    .background(WidgetBackground(scheme: colorScheme))
+                    .background {
+                        ZStack {
+                            // Dæmpet: fladen bliver gennemsigtig, og det slørede skrivebord ses bagved.
+                            if dim > 0 {
+                                BehindWindowBlur().transition(.opacity)
+                            }
+                            WidgetBackground(scheme: colorScheme)
+                                .opacity(1 - dim * (1 - WidgetDimLook.backgroundOpacity))
+                        }
+                    }
                     .clipShape(shape)
+                    .animation(.easeInOut(duration: WidgetMetrics.dimTransition), value: dim)
             }
         }
         .overlay(WidgetRim(height: size.height))
@@ -42,7 +57,7 @@ struct WidgetBackground: View {
     var body: some View {
         switch scheme {
         case .dark:
-            LinearGradient(colors: [Color(white: 0.145), Color(white: 0.066)],
+            LinearGradient(colors: [Color(white: 0.133), Color(white: 0.048)],
                            startPoint: .top, endPoint: .bottom)
         default:
             LinearGradient(colors: [Color(white: 1.0), Color(white: 0.955)],
@@ -81,4 +96,18 @@ struct WidgetRim: View {
         }
         .allowsHitTesting(false)
     }
+}
+
+/// Sløret skrivebord bag vinduet (som Apples gennemsigtige, dæmpede widgets).
+/// `state = .active`, fordi panelet aldrig er key.
+struct BehindWindowBlur: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let v = NSVisualEffectView()
+        v.blendingMode = .behindWindow
+        v.material = .hudWindow
+        v.state = .active
+        return v
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }

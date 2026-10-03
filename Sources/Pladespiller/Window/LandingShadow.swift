@@ -25,8 +25,11 @@ final class LandingShadow {
     }
 
     var isVisible: Bool { panel.isVisible }
+    /// Tælles op ved hvert show/hide, så en gammel hide-completion ikke skjuler en ny visning (QA M2).
+    private var generation = 0
 
     func show(at frame: CGRect, below window: NSWindow) {
+        generation += 1
         panel.appearance = window.appearance
         panel.setFrame(frame, display: true)
         panel.order(.below, relativeTo: window.windowNumber)
@@ -46,11 +49,16 @@ final class LandingShadow {
     }
 
     func hide() {
+        generation += 1
+        let mine = generation
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = 0.2
             panel.animator().alphaValue = 0
-        }, completionHandler: { [panel] in
-            MainActor.assumeIsolated { panel.orderOut(nil) }
+        }, completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.generation == mine else { return }
+                self.panel.orderOut(nil)
+            }
         })
     }
 }
