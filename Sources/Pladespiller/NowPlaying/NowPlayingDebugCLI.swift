@@ -8,7 +8,9 @@ import AppKit
 ///   --selftest             kør parser-/logiktest på eksempeldata (sender ingen Apple Events) og afslut
 ///   --cmd playpause|next|previous   send en kommando 2 s efter start
 ///   --app spotify|music    hvilken app --cmd sendes til (standard: den der vises)
-///   --print-scripts        udskriv de AppleScripts der bruges, og afslut
+///   --print-scripts        udskriv AppleScript-reservens scripts, og afslut
+///   --applescript          brug AppleScript-reserven i stedet for Apple Events til pid (virker også i appen)
+///   --log                  skriv også til ~/Library/Logs/Pladespiller/nowplaying.log (virker også i appen)
 ///   --quiet                kun ændringer i det viste, ikke kildernes hændelser
 enum NowPlayingDebugCLI {
     private static let clock: DateFormatter = {

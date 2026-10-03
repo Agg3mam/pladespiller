@@ -2,7 +2,7 @@ import Foundation
 
 /// Resultatet af et AppleScript, oversat til en `Sendable` værdi, så det kan sendes fra
 /// AppleScript-køen tilbage til main actor (og så parsning kan testes med eksempeldata).
-enum ScriptValue: Sendable, Equatable {
+nonisolated enum ScriptValue: Sendable, Equatable {
     case text(String)
     case number(Double)
     case bool(Bool)
@@ -41,8 +41,8 @@ enum ScriptValue: Sendable, Equatable {
     }
 }
 
-/// Fejl fra NSAppleScript.
-struct ScriptError: Error, Sendable, CustomStringConvertible {
+/// Fejl fra et Apple Event eller NSAppleScript.
+nonisolated struct ScriptError: Error, Sendable, CustomStringConvertible {
     var number: Int
     var message: String
 
@@ -50,103 +50,55 @@ struct ScriptError: Error, Sendable, CustomStringConvertible {
     var isNotAuthorized: Bool { number == -1743 }
     /// -600/-609: appen kører ikke / forbindelsen er væk (fx lukket lige før kaldet).
     var isAppGone: Bool { number == -600 || number == -609 }
+    /// -1744: macOS har ikke spurgt brugeren endnu.
+    var needsConsent: Bool { number == -1744 }
     /// -1712: timeout.
     var isTimeout: Bool { number == -1712 }
 
     var description: String { "AppleScript-fejl \(number): \(message)" }
 }
 
-/// Et kørt script: resultat plus hvornår det startede og sluttede (til `positionTimestamp`).
-struct ScriptOutcome: Sendable {
-    var result: Result<ScriptValue, ScriptError>
-    var started: Date
-    var finished: Date
-
-    /// Bedste gæt på hvornår appen læste værdierne: midt i rundturen.
-    var measuredAt: Date { started.addingTimeInterval(finished.timeIntervalSince(started) / 2) }
-    var milliseconds: Int { Int((finished.timeIntervalSince(started) * 1000).rounded()) }
-}
-
-/// Kører AppleScript væk fra main thread.
-///
-/// NSAppleScript er ikke trådsikker, så ALLE scripts kører på én seriel kø, og de kompilerede
-/// scripts (`compiled`) røres kun fra den kø. Scripts kompileres først, når de skal køres
-/// (dvs. når appen kører), så vi aldrig slår en app op, der ikke er installeret.
+/// Reserve: kører AppleScript-tekst (bruges kun med `--applescript` / `PLADESPILLER_APPLESCRIPT=1`,
+/// hvis pid-adresserede Apple Events skulle drille). Samme serielle kø som `AppleEventQueue`, så
+/// NSAppleScript aldrig bruges fra to tråde. Scripts kompileres først, når appen kører.
 nonisolated final class AppleScriptRunner: @unchecked Sendable {
     static let shared = AppleScriptRunner()
 
-    private let queue = DispatchQueue(label: "dk.holgerskov.Pladespiller.applescript", qos: .userInitiated)
-    private var compiled: [String: NSAppleScript] = [:]   // kun på `queue`
+    private var compiled: [String: NSAppleScript] = [:]   // kun på køen
 
-    func run(_ source: String) async -> ScriptOutcome {
-        await withCheckedContinuation { (cont: CheckedContinuation<ScriptOutcome, Never>) in
-            queue.async {
-                cont.resume(returning: self.runOnQueue(source))
+    func run(_ source: String) async -> Timed<ScriptValue> {
+        await withCheckedContinuation { (cont: CheckedContinuation<Timed<ScriptValue>, Never>) in
+            AppleEventQueue.shared.queue.async {
+                let started = Date()
+                let r = self.runOnQueue(source)
+                cont.resume(returning: Timed(result: r, started: started, finished: Date()))
             }
         }
     }
 
-    private func runOnQueue(_ source: String) -> ScriptOutcome {
-        let started = Date()
-        func done(_ r: Result<ScriptValue, ScriptError>) -> ScriptOutcome {
-            ScriptOutcome(result: r, started: started, finished: Date())
-        }
+    private func runOnQueue(_ source: String) -> Result<ScriptValue, ScriptError> {
         let script: NSAppleScript
         if let s = compiled[source] {
             script = s
         } else {
             guard let s = NSAppleScript(source: source) else {
-                return done(.failure(ScriptError(number: -1, message: "Kunne ikke oprette script")))
+                return .failure(ScriptError(number: -1, message: "Kunne ikke oprette script"))
             }
             var err: NSDictionary?
-            if !s.compileAndReturnError(&err) {
-                return done(.failure(Self.error(from: err)))
-            }
+            if !s.compileAndReturnError(&err) { return .failure(Self.error(from: err)) }
             compiled[source] = s
             script = s
         }
         var err: NSDictionary?
         let desc = script.executeAndReturnError(&err)
-        if let err { return done(.failure(Self.error(from: err))) }
-        return done(.success(Self.value(from: desc)))
+        if let err { return .failure(Self.error(from: err)) }
+        return .success(AE.value(from: desc))
     }
 
     private static func error(from dict: NSDictionary?) -> ScriptError {
         let n = (dict?[NSAppleScript.errorNumber] as? NSNumber)?.intValue ?? -1
         let m = dict?[NSAppleScript.errorMessage] as? String ?? "ukendt fejl"
         return ScriptError(number: n, message: m)
-    }
-
-    /// Oversætter en NSAppleEventDescriptor til `ScriptValue`.
-    static func value(from d: NSAppleEventDescriptor) -> ScriptValue {
-        switch d.descriptorType {
-        case fcc("list"):
-            guard d.numberOfItems > 0 else { return .list([]) }
-            return .list((1...d.numberOfItems).map { i in d.atIndex(i).map(value(from:)) ?? .missing })
-        case fcc("utxt"), fcc("utf8"), fcc("TEXT"):
-            return .text(d.stringValue ?? "")
-        case fcc("long"), fcc("shor"), fcc("comp"), fcc("doub"), fcc("sing"), fcc("magn"), fcc("ucom"), fcc("exte"):
-            return .number(d.doubleValue)
-        case fcc("true"): return .bool(true)
-        case fcc("fals"): return .bool(false)
-        case fcc("bool"): return .bool(d.booleanValue)
-        case fcc("null"): return .missing
-        case fcc("type"):
-            return d.typeCodeValue == fcc("msng") ? .missing : .text(d.stringValue ?? fourCCString(d.typeCodeValue))
-        case fcc("enum"):
-            return .text(d.stringValue ?? fourCCString(d.enumCodeValue))
-        default:
-            // Fx cover-data ('tdta', 'JPEG', 'PNGf', 'PICT').
-            return .data(d.data)
-        }
-    }
-
-    static func fcc(_ s: String) -> FourCharCode {
-        s.utf8.reduce(0) { ($0 << 8) | FourCharCode($1) }
-    }
-
-    static func fourCCString(_ c: FourCharCode) -> String {
-        String(bytes: [UInt8(c >> 24 & 0xFF), UInt8(c >> 16 & 0xFF), UInt8(c >> 8 & 0xFF), UInt8(c & 0xFF)], encoding: .macOSRoman) ?? "????"
     }
 }
 

@@ -36,6 +36,13 @@ final class NowPlayingStore {
     func nextTrack() { active?.nextTrack() }
     func previousTrack() { active?.previousTrack() }
 
+    /// Åbner Systemindstillinger ▸ Anonymitet og sikkerhed ▸ Automatisering (hvor man giver adgang til Spotify/Musik).
+    func openAutomationSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     /// Åbner den app der spiller (uden at starte afspilning).
     func openSourceApp() {
         guard let id = current?.sourceAppBundleID,
@@ -53,6 +60,29 @@ final class NowPlayingStore {
         let pick = (playing.isEmpty ? withTrack : playing).max { $0.lastChange < $1.lastChange }
         active = pick ?? active
         let next = pick?.current
-        if next != current { current = next }
+        if next != current {
+            if next?.trackKey != current?.trackKey || next?.isPlaying != current?.isPlaying
+                || (next?.artwork == nil) != (current?.artwork == nil) {
+                NowPlayingLog.log("[vist] " + (next.map { "\($0.isPlaying ? "▶︎" : "⏸") \($0.title) – \($0.artist) "
+                    + "[\(formatTime($0.position())) / \(formatTime($0.duration))] cover:\($0.artwork == nil ? "nej" : "ja") "
+                    + "kilde:\($0.sourceAppBundleID)" } ?? "intet"))
+            }
+            current = next
+        }
+
+        // Adgangsproblem: helst den viste kildes, ellers den aktive kildes, ellers det første.
+        let problems = sources.compactMap { ($0 as? AccessReporting)?.accessProblem }
+        let problem = problems.first { $0.bundleID == current?.sourceAppBundleID }
+            ?? problems.first { $0.bundleID == active?.bundleID }
+            ?? problems.first
+        if problem != accessProblem {
+            NowPlayingLog.log("[vist] adgangsproblem: \(problem?.message ?? "intet")")
+            accessProblem = problem
+        }
     }
+}
+
+/// En kilde der kan mangle tilladelse (Apple Events). `NowPlayingStore` samler problemerne.
+protocol AccessReporting: AnyObject {
+    var accessProblem: SourceAccessProblem? { get }
 }
