@@ -30,6 +30,10 @@ enum WidgetMetrics {
 
     // Falmet look
     static let dimTransition: TimeInterval = 0.3
+    /// Ved dimAmount = 1 (lineært imellem). Foreslået af Vindue-agenten; ikke målt på Apples dæmpede widgets endnu.
+    static let dimContentSaturation: Double = 0
+    static let dimContentOpacity: Double = 0.6
+    static let dimBackgroundOpacity: Double = 0.2
 
     // Træk
     static let dragThreshold: CGFloat = 4
