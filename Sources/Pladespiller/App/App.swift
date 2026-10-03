@@ -1,0 +1,64 @@
+import AppKit
+import SwiftUI
+
+/// Opstart. Ejes af hovedagenten.
+///
+/// Kommandolinje:
+///   --mock                    brug testdata (scriptet løkke) i stedet for Spotify/Musik
+///   --render-snapshots <dir>  tegn visninger til PNG og afslut (Grafik-agenten)
+///   --nowplaying-log          log det der spiller og afslut aldrig (Musikdata-agenten)
+@main
+enum PladespillerMain {
+    static func main() {
+        let args = CommandLine.arguments
+        let mock = args.contains("--mock") || ProcessInfo.processInfo.environment["PLADESPILLER_MOCK"] == "1"
+
+        if let i = args.firstIndex(of: "--render-snapshots") {
+            let dir = args.indices.contains(i + 1) ? args[i + 1] : "snapshots"
+            SnapshotRenderer.run(outputDirectory: URL(fileURLWithPath: dir))
+            exit(0)
+        }
+        if args.contains("--nowplaying-log") {
+            NowPlayingDebugCLI.run(mock: mock)
+        }
+
+        // Kun én kopi ad gangen.
+        if let id = Bundle.main.bundleIdentifier,
+           NSRunningApplication.runningApplications(withBundleIdentifier: id).count > 1 {
+            exit(0)
+        }
+
+        let app = NSApplication.shared
+        let delegate = AppDelegate(mock: mock)
+        app.delegate = delegate
+        app.setActivationPolicy(.accessory)
+        app.run()
+    }
+}
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    let settings = Settings()
+    let store: NowPlayingStore
+    private var panel: WidgetPanelController?
+
+    init(mock: Bool) {
+        store = NowPlayingStore(sources: mock ? [MockNowPlayingSource()] : NowPlayingStore.defaultSources())
+        super.init()
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        store.start()
+        let settings = settings, store = store
+        let panel = WidgetPanelController(settings: settings) {
+            WidgetView()
+                .environment(settings)
+                .environment(store)
+        }
+        panel.show()
+        self.panel = panel
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        store.stop()
+    }
+}

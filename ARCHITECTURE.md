@@ -1,0 +1,60 @@
+# Pladespiller – arkitektur
+
+En lille baggrundsapp (LSUIElement) med et kantløst `NSPanel` nede på skrivebordet, der ser ud og opfører sig som en macOS-widget. Indholdet er en pladespiller set ovenfra, der viser det der spiller i Spotify/Musik.
+
+Byg: `./build.sh` (`--install`, `--run`, `--run --mock`). Kun Command Line Tools, Swift Package Manager, macOS 26+ (brugerens Mac: macOS 27.2, Apple Silicon). Hele modulet er `@MainActor` som standard (`defaultIsolation`).
+
+## Sådan hænger det sammen
+
+```
+App.swift ── opretter ──▶ Settings (@Observable, UserDefaults)
+          ├─ opretter ──▶ NowPlayingStore(sources: [Spotify, Musik] eller [Mock])
+          └─ opretter ──▶ WidgetPanelController(settings) { WidgetView() }
+                               └─ NSHostingView( WidgetChrome { WidgetView } )
+WidgetView læser Settings + NowPlayingStore fra environment.
+```
+
+- **Kilder** implementerer `NowPlayingSource` og kalder `onChange`. `NowPlayingStore` vælger den der sidst ændrede sig blandt dem der spiller.
+- **Position** udregnes lokalt: `NowPlaying.position(at:)`. UI'et bruger `TimelineView`/animation, ikke polling.
+- **Kommandolinje** (til test uden vindue): `--mock`, `--render-snapshots <mappe>`, `--nowplaying-log [--mock]`.
+
+## Ejerskab af filer
+
+En agent ændrer kun sine egne filer. Ændringer i fælles filer bestilles hos hovedagenten.
+
+| Ejer | Filer |
+|---|---|
+| Hovedagent | `Package.swift`, `ARCHITECTURE.md`, `Sources/Pladespiller/App/*`, `Sources/Pladespiller/Shared/*` (NowPlaying, NowPlayingSource, MockNowPlayingSource, Settings, WidgetMetrics) |
+| Vindue-agent | `Sources/Pladespiller/Window/*` (panel, chrome/baggrund, træk, gitter, placering, falmet look, højrekliksmenu, Åbn ved login) |
+| Grafik-agent | `Sources/Pladespiller/Views/*` (WidgetView, pladespiller, plade, sheen, arm, knapper, temaer, SnapshotRenderer) |
+| Musikdata-agent | `Sources/Pladespiller/NowPlaying/*` (NowPlayingStore, Spotify, Musik, AppleScript, cover-cache, DebugCLI) |
+| Build-agent | `build.sh`, `Resources/*`, `scripts/*` |
+| QA | `qa/*` (rapporter og billeder), ingen kildekode |
+
+## Faste aftaler (API)
+
+- `NowPlaying` (Shared/NowPlaying.swift): `trackKey`, `position(at:)`, `progress(at:)`, `formatTime(_:)`.
+- `NowPlayingSource` (Shared/NowPlayingSource.swift).
+- `NowPlayingStore`: `current`, `start()`, `stop()`, `playPause()`, `nextTrack()`, `previousTrack()`, `openSourceApp()`, `static defaultSources()`.
+- `Settings`: `size`, `theme`, `colorMode`, `positionLocked`, `savedOrigin(screenID:)`, `saveOrigin(_:screenID:)`.
+- `WidgetMetrics`: gitter 180 pt, indryk 8 pt, radius 28 pt, vinduesniveau, animationstider.
+- `WidgetChrome` giver indholdet en flade på `WidgetMetrics.bodySize(for:)` og klipper den med radius 28.
+- `MockNowPlayingSource.sample(_:isPlaying:progress:)` og `.artwork(for:)` til snapshots.
+
+## Regler
+
+- Kun hovedagenten og QA starter selve appen og tager skærmbilleder. Kun én kopi kører ad gangen.
+- Skærmbilleder tages kun af enkelte vinduer (`screencapture -l <id>`): vores widget og Apples widget-vinduer. Aldrig hele skærmen.
+- Start aldrig Spotify eller Musik. Send kun AppleScript til en app, der allerede kører.
+- Al tekst i appen er på dansk.
+
+## Beslutningslog
+
+- **2026-10-03 · Bølge 0.** macOS 27.2 / arm64, kun Command Line Tools → SPM + `build.sh`. Bundle-id `dk.holgerskov.Pladespiller`.
+- **2026-10-03 · Målt på brugerens Apple-widgets** (Ur, Album, Kalender, Status) via CGWindowList og `screencapture -l`:
+  vinduesniveau `-2147483601` (= `desktopIconWindow + 2`); vinduer 180×180 / 360×180 / 360×360 kant i kant i et 180 pt-gitter
+  (fx x = 313, 493, 673, 853, 1033; y = 38, 218); synlig flade indrykket 8 pt; hjørneradius 28 pt continuous (bedste tilpasning);
+  ingen synlig systemskygge; svag lys kant ≈1 px. Widget-stil `com.apple.widgets widgetAppearance = 1`; widgets er p.t. mørke og
+  uigennemsigtige selvom systemet er i lys tilstand.
+- **2026-10-03 · Vinduesniveau** `desktopIconWindow + 2` = samme lag som Apples widgets. Bekræftet med CGWindowList.
+- **2026-10-03 · Standardtema** Træ (foreløbig, skal bekræftes af brugeren).
