@@ -102,6 +102,7 @@ enum SnapshotRenderer {
         // 7. Vinkler som tal for op- og nedbremsning (kontinuitet)
         spinReport(to: dir.appendingPathComponent("spin-vinkler.txt"))
         armReport(to: dir.appendingPathComponent("arm-vinkler.txt"))
+        caCheck(to: dir.appendingPathComponent("ca-tjek.txt"))
         print(String(format: "Snapshots færdige på %.1f s", Date().timeIntervalSince(started)))
     }
 
@@ -248,6 +249,51 @@ enum SnapshotRenderer {
         }
         try? lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
         print("Skrev \(url.path)")
+    }
+}
+
+extension SnapshotRenderer {
+    /// Tjekker live-vejen uden vindue: lægger CA-animationerne ind og sammenligner keyframes med den analytiske pose.
+    static func caCheck(to url: URL) {
+        let g = TurntableGeometry(size: CGSize(width: 148, height: 148), cornerRadius: 20)
+        let layer = TurntableLayer()
+        // Ny størrelse (ikke i cachen) for at måle hvad det koster at tegne alle billeder første gang.
+        let fresh = TurntableGeometry(size: CGSize(width: 149, height: 149), cornerRadius: 20)
+        let t0 = Date()
+        layer.configure(fresh, style: TurntableStyle.make(theme: .wood, artwork: nil), scale: 2)
+        let buildMs = Date().timeIntervalSince(t0) * 1000
+        let t1 = Date()
+        layer.configure(fresh, style: TurntableStyle.make(theme: .wood, artwork: nil), scale: 2)
+        let cachedMs = Date().timeIntervalSince(t1) * 1000
+        layer.configure(g, style: TurntableStyle.make(theme: .wood, artwork: nil), scale: 2)
+        var lines = [String(format: "Alle billeder tegnet første gang @2x: %.0f ms; igen (cache): %.2f ms", buildMs, cachedMs)]
+        var a = TurntableAnimator(geometry: g)
+        let now = 1000.0
+        a.update(nil, at: now - 5)
+        let events: [(Double, NowPlaying?)] = [(now, np(0, progress: 0.3, at: 0)), (now + 3, np(0, playing: false, progress: 0.3 + 3 / 238, at: 3))]
+        for (t, n) in events {
+            a.update(n.map { TurntableInput($0, at: base.addingTimeInterval(t - now)) }, at: t)
+            layer.sync(a, at: t)
+            lines.append(String(format: "Efter hændelse t=%+.1f (%@):", t - now, n?.isPlaying == true ? "afspil" : "pause"))
+            for (name, l) in layer.debugLayers {
+                for key in l.animationKeys() ?? [] {
+                    guard let anim = l.animation(forKey: key) else { continue }
+                    var desc = String(format: "  %@.%@: varighed %.2f s", name, key, anim.duration)
+                    if anim.repeatCount.isInfinite { desc += ", gentages uendeligt" }
+                    if let kf = anim as? CAKeyframeAnimation { desc += ", \(kf.values?.count ?? 0) keyframes" }
+                    lines.append(desc)
+                }
+            }
+            // sammenlign armens keyframe midt i overgangen med analytisk værdi
+            if let kf = layer.debugLayers.first(where: { $0.0 == "arm" })?.1.animation(forKey: "arm") as? CAKeyframeAnimation,
+               let vals = kf.values as? [Double], let times = kf.keyTimes?.map(\.doubleValue) {
+                let mid = vals.count / 3
+                let tm = t + times[mid] * kf.duration
+                lines.append(String(format: "  arm-keyframe %d: %.4f rad, analytisk %.4f rad", mid, -vals[mid], a.pose(at: tm).armAngle))
+            }
+        }
+        try? lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+        print(lines.joined(separator: "\n"))
     }
 }
 

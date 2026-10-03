@@ -240,8 +240,12 @@ final class TurntableLayer {
     @discardableResult
     private func keyframes(_ layer: CALayer, _ keyPath: String, _ times: [Double], _ values: [Any], key: String) -> CAKeyframeAnimation? {
         guard times.count >= 2, values.count == times.count, let first = times.first, let last = times.last, last > first else { return nil }
-        if let nums = values as? [Double], let lo = nums.min(), let hi = nums.max(), hi - lo < 1e-6 { return nil }
-        if let pts = values as? [NSValue], Set(pts.map { "\($0.pointValue)" }).count == 1 { return nil }
+        // NB: [Double] kan bridges til [NSNumber] (= NSValue), så tal tjekkes først og punkter kun hvis det ikke er tal.
+        if let nums = values as? [Double] {
+            if let lo = nums.min(), let hi = nums.max(), hi - lo < 1e-6 { return nil }
+        } else if let pts = values as? [NSValue], Set(pts.map { "\($0.pointValue)" }).count == 1 {
+            return nil
+        }
         let anim = CAKeyframeAnimation(keyPath: keyPath)
         anim.values = values
         anim.keyTimes = times.map { NSNumber(value: ($0 - first) / (last - first)) }
@@ -251,6 +255,12 @@ final class TurntableLayer {
         anim.fillMode = .backwards
         layer.add(anim, forKey: key)
         return anim
+    }
+
+    /// Til test: navngivne lag med animationer.
+    var debugLayers: [(String, CALayer)] {
+        [("rotor", rotor), ("arm", armRot), ("armLøft", armImage), ("skygge", shadowImage), ("skyggeFlyt", shadowMove),
+         ("etiket", previousLabelLayer), ("led", ledGlow), ("krop", root)]
     }
 
     // MARK: Snapshot
@@ -264,11 +274,7 @@ final class TurntableLayer {
         guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: Drawing.colorSpace,
                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
         ctx.scaleBy(x: scale, y: scale)
-        // render(in:) tegner ikke lagets egen opacity – læg den på konteksten.
-        ctx.setAlpha(CGFloat(layer.root.opacity))
-        ctx.beginTransparencyLayer(auxiliaryInfo: nil)
-        layer.root.render(in: ctx)
-        ctx.endTransparencyLayer()
+        layer.root.render(in: ctx)   // render(in:) tager selv højde for opacity og affine transformationer
         return ctx.makeImage()
     }
 }
