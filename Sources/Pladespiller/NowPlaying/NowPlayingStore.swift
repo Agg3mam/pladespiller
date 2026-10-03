@@ -19,12 +19,15 @@ final class NowPlayingStore {
         }
     }
 
-    /// De rigtige kilder (Spotify og Musik). Udfyldes af Musikdata-agenten.
+    /// De rigtige kilder (Spotify og Musik).
     static func defaultSources() -> [NowPlayingSource] {
-        []
+        [SpotifySource(), MusicSource()]
     }
 
-    func start() { sources.forEach { $0.start() } }
+    func start() {
+        sources.forEach { $0.start() }
+        recompute()
+    }
     func stop() { sources.forEach { $0.stop() } }
 
     func playPause() { active?.playPause() }
@@ -39,6 +42,9 @@ final class NowPlayingStore {
     }
 
     /// Spiller flere, vises den der sidst ændrede sig. Spiller ingen, vises den sidst ændrede (på pause).
+    /// Har ingen kilde en sang, er `current` nil, men knapperne går stadig til den sidst viste kilde.
+    /// (`lastChange` flyttes kun ved ny sang / afspil-pause / spring, ikke når coveret ankommer,
+    /// så valget ikke hopper frem og tilbage.)
     private func recompute() {
         let withTrack = sources.filter { $0.current != nil }
         let playing = withTrack.filter { $0.current?.isPlaying == true }
