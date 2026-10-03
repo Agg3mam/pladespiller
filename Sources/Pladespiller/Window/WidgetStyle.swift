@@ -10,7 +10,7 @@ import SwiftUI
 ///   med endelsen `Light`/`Dark` (fast) eller ingen/`Automatic` (følger systemet).
 ///   Hos brugeren: `RegularDark` → widgets er mørke og uigennemsigtige selv i lys tilstand.
 /// - `com.apple.widgets widgetAppearance` = Skrivebord og Dock ▸ "Widgetstil"
-///   (Automatisk / Monokrom / Fuld farve). Gemmes til det falmede look (senere milepæl).
+///   (Automatisk / Monokrom / Fuld farve). Bruges af `WidgetDimming`; 1 = Fuld farve (udledt).
 @Observable
 final class WidgetStyle {
     enum Material: Equatable {
@@ -35,21 +35,25 @@ final class WidgetStyle {
         }
     }
 
-    @ObservationIgnored private var observers: [NSObjectProtocol] = []
-    @ObservationIgnored private var kvo: DefaultsObserver?
+    @ObservationIgnored private var distributed: DistributedObserver?
+    @ObservationIgnored private var kvo: [DefaultsObserver] = []
 
     init() {
         reload()
-        let dnc = DistributedNotificationCenter.default()
-        for name in ["AppleInterfaceThemeChangedNotification",
-                     "AppleIconAppearanceThemeChangedNotification",
-                     "com.apple.widgets.appearanceChanged"] {
-            observers.append(dnc.addObserver(forName: Notification.Name(name), object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.reload() }
-            })
-        }
-        kvo = DefaultsObserver(keys: ["AppleIconAppearanceTheme", "AppleInterfaceStyle"]) { [weak self] in
+        // Appen er aldrig aktiv → .deliverImmediately, ellers holdes notifikationerne tilbage (QA A3).
+        distributed = DistributedObserver(names: ["AppleInterfaceThemeChangedNotification",
+                                                  "AppleIconAppearanceThemeChangedNotification",
+                                                  "com.apple.widgets.appearanceChanged"]) { [weak self] in
             self?.reload()
+        }
+        kvo.append(DefaultsObserver(defaults: .standard,
+                                    keys: ["AppleIconAppearanceTheme", "AppleInterfaceStyle"]) { [weak self] in
+            self?.reload()
+        })
+        if let widgets = UserDefaults(suiteName: "com.apple.widgets") {
+            kvo.append(DefaultsObserver(defaults: widgets, keys: ["widgetAppearance"]) { [weak self] in
+                self?.reload()
+            })
         }
     }
 
@@ -76,20 +80,46 @@ final class WidgetStyle {
     }
 }
 
-/// KVO på UserDefaults.standard (som også ser det globale domæne).
+/// Distribuerede notifikationer med `.deliverImmediately` (selector-API'et kræver et NSObject).
+final class DistributedObserver: NSObject {
+    private let onChange: @MainActor () -> Void
+    private let names: [String]
+
+    init(names: [String], onChange: @escaping @MainActor () -> Void) {
+        self.names = names
+        self.onChange = onChange
+        super.init()
+        let dnc = DistributedNotificationCenter.default()
+        for n in names {
+            dnc.addObserver(self, selector: #selector(fired(_:)), name: Notification.Name(n),
+                            object: nil, suspensionBehavior: .deliverImmediately)
+        }
+    }
+
+    deinit { DistributedNotificationCenter.default().removeObserver(self) }
+
+    @objc nonisolated private func fired(_ note: Notification) {
+        let cb = onChange
+        Task { @MainActor in cb() }
+    }
+}
+
+/// KVO på en UserDefaults (`.standard` ser også det globale domæne).
 private final class DefaultsObserver: NSObject {
+    nonisolated(unsafe) private let defaults: UserDefaults
     private let keys: [String]
     private let onChange: @MainActor () -> Void
 
-    init(keys: [String], onChange: @escaping @MainActor () -> Void) {
+    init(defaults: UserDefaults, keys: [String], onChange: @escaping @MainActor () -> Void) {
+        self.defaults = defaults
         self.keys = keys
         self.onChange = onChange
         super.init()
-        for k in keys { UserDefaults.standard.addObserver(self, forKeyPath: k, options: [], context: nil) }
+        for k in keys { defaults.addObserver(self, forKeyPath: k, options: [], context: nil) }
     }
 
     deinit {
-        for k in keys { UserDefaults.standard.removeObserver(self, forKeyPath: k) }
+        for k in keys { defaults.removeObserver(self, forKeyPath: k) }
     }
 
     nonisolated override func observeValue(forKeyPath keyPath: String?, of object: Any?,
