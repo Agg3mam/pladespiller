@@ -5,6 +5,7 @@ import SwiftUI
 /// I snapshots: tegn pladespilleren i denne pose i stedet for den levende CA-visning.
 struct TurntableSnapshotPose {
     var pose: TurntablePose
+    var dim: Double = 0
 }
 
 private struct TurntableSnapshotKey: EnvironmentKey {
@@ -24,6 +25,9 @@ struct TurntableView: View {
     var cornerRadius: CGFloat = 20
     let theme: TurntableTheme
     let nowPlaying: NowPlaying?
+    var dim: Double = 0
+    var onArmClick: () -> Void = {}
+    var onRecordClick: () -> Void = {}
 
     @Environment(\.turntableSnapshot) private var snapshot
     @Environment(\.displayScale) private var displayScale
@@ -34,22 +38,25 @@ struct TurntableView: View {
     var body: some View {
         Group {
             if let snapshot {
-                if let cg = TurntableLayer.snapshot(geometry, style: style, scale: displayScale, pose: snapshot.pose) {
+                if let cg = TurntableLayer.snapshot(geometry, style: style, scale: displayScale, pose: snapshot.pose, dim: snapshot.dim) {
                     Image(decorative: cg, scale: displayScale)
                         .resizable()
                 }
             } else {
-                LiveTurntable(geometry: geometry, style: style, nowPlaying: nowPlaying)
+                LiveTurntable(geometry: geometry, style: style, nowPlaying: nowPlaying, dim: dim,
+                              onArmClick: onArmClick, onRecordClick: onRecordClick)
             }
         }
         .frame(width: size.width, height: size.height)
         .accessibilityElement()
         .accessibilityLabel(accessibilityText)
+        .accessibilityAction(named: nowPlaying?.isPlaying == true ? "Pause" : "Afspil", onArmClick)
+        .accessibilityAction(named: "Åbn musikappen", onRecordClick)
     }
 
     private var accessibilityText: String {
         guard let np = nowPlaying else { return "Pladespiller. Intet spiller" }
-        return "Pladespiller. \(np.isPlaying ? "Spiller" : "Pause"): \(np.title) af \(np.artist)"
+        return "Pladespiller. \(np.isPlaying ? "Spiller" : "På pause"): \(TrackStrings.title(np)) af \(TrackStrings.artist(np))"
     }
 }
 
@@ -57,12 +64,18 @@ private struct LiveTurntable: NSViewRepresentable {
     let geometry: TurntableGeometry
     let style: TurntableStyle
     let nowPlaying: NowPlaying?
+    let dim: Double
+    let onArmClick: () -> Void
+    let onRecordClick: () -> Void
 
     func makeNSView(context: Context) -> TurntableNSView { TurntableNSView() }
 
     func updateNSView(_ view: TurntableNSView, context: Context) {
+        view.onArmClick = onArmClick
+        view.onRecordClick = onRecordClick
         view.configure(geometry: geometry, style: style)
         view.update(nowPlaying)
+        view.setDim(dim)
     }
 }
 
@@ -83,8 +96,74 @@ final class TurntableNSView: NSView {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    /// Klik og træk går videre til widgetten (vindue/menu ejes af Vindue-agenten).
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    var onArmClick: () -> Void = {}
+    var onRecordClick: () -> Void = {}
+
+    // MARK: Klik
+    //
+    // Kun armen og pladen tager imod klik; alt andet går videre (nil), så vinduet kan trækkes derfra.
+    // Træk længere end 4 pt overtages af panelet, som afslutter med et mouseUp langt uden for vinduet –
+    // så bliver et træk aldrig til et klik.
+
+    private enum Target { case arm, record }
+    private var pressed: Target?
+
+    private func target(at local: NSPoint) -> Target? {
+        guard let g = geometry else { return nil }
+        let p = CGPoint(x: local.x, y: bounds.height - local.y)          // y nedad som geometrien
+        // Armen (ved sin vinkel lige nu)
+        let a = turntable.visibleArmAngle()
+        let dx = p.x - g.pivot.x, dy = p.y - g.pivot.y
+        let lx = dx * cos(a) + dy * sin(a), ly = -dx * sin(a) + dy * cos(a)
+        let slack: CGFloat = 5
+        if lx > g.counterweightEnd - slack, lx < g.tubeLength + g.headshellLength + slack {
+            let halfWidth = lx > g.tubeLength * 0.95 ? g.headshellWidth + slack : max(g.counterweightRadius, g.tubeWidth) + slack
+            let mid: CGFloat = lx > g.tubeLength ? (lx - g.tubeLength) * tan(g.headshellAngle) : 0
+            if abs(ly - mid) < halfWidth { return .arm }
+        }
+        if hypot(p.x - g.center.x, p.y - g.center.y) < g.recordRadius { return .record }
+        return nil
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let sv = superview else { return nil }
+        let local = convert(point, from: sv)
+        return target(at: local) == nil ? nil : self
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        pressed = target(at: convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        defer { pressed = nil }
+        let local = convert(event.locationInWindow, from: nil)
+        guard let pressed, bounds.contains(local), target(at: local) == pressed else { return }
+        switch pressed {
+        case .arm: onArmClick()
+        case .record: onRecordClick()
+        }
+    }
+
+    override func resetCursorRects() {
+        // Lille hjælp: håndcursor over pladen viser at den kan klikkes.
+        guard let g = geometry else { return }
+        let r = g.recordRadius
+        addCursorRect(NSRect(x: g.center.x - r, y: bounds.height - g.center.y - r, width: r * 2, height: r * 2), cursor: .pointingHand)
+    }
+
+    // MARK: Dæmpning
+
+    private var dimTarget: Double = -1
+
+    func setDim(_ amount: Double) {
+        guard amount != dimTarget else { return }
+        let first = dimTarget < 0
+        dimTarget = amount
+        turntable.setDim(amount, animated: !first && window != nil)
+    }
 
     private var scale: CGFloat { window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2 }
 
@@ -133,6 +212,8 @@ final class TurntableNSView: NSView {
         guard let window else { return }
         center.addObserver(self, selector: #selector(occlusionChanged),
                            name: NSWindow.didChangeOcclusionStateNotification, object: window)
+        // QA M6: læs tilstanden med det samme – vinduet kan allerede være skjult.
+        visible = window.occlusionState.contains(.visible) || !window.isVisible
         rebuild()
     }
 

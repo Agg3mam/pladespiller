@@ -92,13 +92,31 @@ enum Drawing {
 
     /// Gennemsnitsfarve af et billede (til tema "Auto").
     static func averageColor(_ image: CGImage) -> SIMD3<Float> {
+        // Bufferen skal leve hele tiden konteksten bruges (QA M3): alt sker inde i withUnsafeMutableBytes.
         var px = [UInt8](repeating: 0, count: 4)
-        guard let ctx = CGContext(data: &px, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
-                                  space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
-        else { return SIMD3(0.4, 0.4, 0.4) }
-        ctx.interpolationQuality = .medium
-        ctx.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        let ok = px.withUnsafeMutableBytes { raw -> Bool in
+            guard let ctx = CGContext(data: raw.baseAddress, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                                      space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            ctx.interpolationQuality = .medium
+            ctx.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+            return true
+        }
+        guard ok else { return SIMD3(0.4, 0.4, 0.4) }
         return SIMD3(Float(px[0]), Float(px[1]), Float(px[2])) / 255
+    }
+
+    /// Gråtonekopi (til dæmpet look: tones ind over originalen i stedet for et CI-filter pr. billede).
+    static func grayscale(_ image: CGImage) -> CGImage? {
+        let w = image.width, h = image.height
+        guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        let rect = CGRect(x: 0, y: 0, width: w, height: h)
+        ctx.draw(image, in: rect)
+        ctx.setBlendMode(.saturation)
+        ctx.setFillColor(gray(0.5))
+        ctx.clip(to: rect, mask: image)
+        ctx.fill(rect)
+        return ctx.makeImage()
     }
 }
 

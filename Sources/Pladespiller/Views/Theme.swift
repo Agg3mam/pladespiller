@@ -28,12 +28,33 @@ struct TurntableStyle: Hashable {
         case .aluminium: TurntableStyle(plinth: .aluminium, darkHardware: true)
         case .black: TurntableStyle(plinth: .black, darkHardware: false)
         case .auto:
-            if let artwork, let cg = Drawing.cgImage(artwork) {
-                TurntableStyle(plinth: autoMaterial(from: Drawing.averageColor(cg)), darkHardware: false)
+            if let artwork, let material = autoMaterial(for: artwork) {
+                TurntableStyle(plinth: material, darkHardware: false)
             } else {
                 TurntableStyle(plinth: .black, darkHardware: false)
             }
         }
+    }
+
+    /// Auto-farven pr. cover caches (QA M4): gennemsnitsfarven regnes kun én gang pr. coverbillede.
+    private static var autoCache: [ObjectIdentifier: PlinthMaterial] = [:]
+    private static var autoOrder: [ObjectIdentifier] = []
+    private static var autoKeepAlive: [ObjectIdentifier: NSImage] = [:]
+
+    static func autoMaterial(for artwork: NSImage) -> PlinthMaterial? {
+        let id = ObjectIdentifier(artwork)
+        if let hit = autoCache[id] { return hit }
+        guard let cg = Drawing.cgImage(artwork) else { return nil }
+        let m = autoMaterial(from: Drawing.averageColor(cg))
+        autoCache[id] = m
+        autoKeepAlive[id] = artwork      // så id'et ikke genbruges af et nyt objekt mens det ligger i cachen
+        autoOrder.append(id)
+        while autoOrder.count > 8 {
+            let old = autoOrder.removeFirst()
+            autoCache[old] = nil
+            autoKeepAlive[old] = nil
+        }
+        return m
     }
 
     /// Dæmpet, mat lakfarve ud fra coverets gennemsnitsfarve.
@@ -82,28 +103,10 @@ enum PlinthRenderer {
         let k = Float(148 / h)   // tekstur i samme tæthed som på lille størrelse
         switch m {
         case .wood(let species):
-            let n = ValueNoise(seed: 7), n2 = ValueNoise(seed: 31), n3 = ValueNoise(seed: 101)
-            let (base, dark, bandAmt): (SIMD3<Float>, SIMD3<Float>, Float) = switch species {
-            case .walnut: (SIMD3(0.47, 0.30, 0.18), SIMD3(0.24, 0.13, 0.07), 0.42)
-            case .oak: (SIMD3(0.82, 0.67, 0.48), SIMD3(0.60, 0.43, 0.26), 0.38)
-            }
+            if species == .walnut, let photo = WoodTexture.fitted(size: size, scale: scale) { return photo }
+            let veneer = WoodVeneer(species: species)
             return Drawing.pixels(size: size, scale: scale) { x, y in
-                let u = x * k, v = y * k
-                // Fin, næsten lige åre langs kroppen med lidt bugtning; hver årering har sin egen styrke.
-                let warp = (n.fbm(u * 0.008, v * 0.030, octaves: 3) - 0.5) * 3.2
-                let rings = v * 0.19 + warp + 0.25 * sin(u * 0.009 + v * 0.01)
-                let idx = rings.rounded(.down)
-                let ph = rings - idx
-                let lineStrength = 0.35 + 0.65 * n3.hash(Int32(idx), 3)
-                let band = pow(0.5 + 0.5 * cos(ph * 2 * .pi), 6) * lineStrength
-                let late = smoothstep(0.35, 0.9, ph) * 0.35
-                let fiber = n2.value(u * 0.05, v * 2.4) - 0.5
-                let fiber2 = n2.value(u * 0.012 + 40, v * 0.9) - 0.5
-                let pore = smoothstep(0.86, 0.98, n3.value(u * 0.7, v * 5.0))
-                let tone = n.fbm(u * 0.004 + 13, v * 0.015, octaves: 2)
-                let amount = bandAmt * band + 0.18 * late * bandAmt + 0.14 * fiber + 0.12 * fiber2 + 0.18 * pore
-                var c = mix(base, dark, min(1, max(0, amount + 0.08)))
-                c *= 0.90 + 0.20 * tone
+                let c = veneer.color(x * k, y * k)
                 return SIMD4(c.x, c.y, c.z, 1)
             }
         case .aluminium:
@@ -111,7 +114,7 @@ enum PlinthRenderer {
             return Drawing.pixels(size: size, scale: scale) { x, y in
                 let u = x * k, v = y * k
                 let brush = (n.value(u * 0.015, v * 2.6) - 0.5) * 0.06 + (n2.value(u * 0.25, v * 9) - 0.5) * 0.035
-                let gch = 0.76 + brush
+                let gch = 0.70 + brush
                 return SIMD4(gch, gch, gch * 1.015, 1)
             }
         case .black:
@@ -135,12 +138,29 @@ enum PlinthRenderer {
         // Lys fra øverst til venstre.
         let strength: CGFloat = switch material {
         case .black: 0.10
-        case .aluminium: 0.16
+        case .aluminium: 0.20
         default: 0.10
         }
         Drawing.fill(ctx, CGPath(rect: rect, transform: nil),
                      Drawing.gradient([(0, Drawing.gray(1, strength)), (0.5, Drawing.gray(1, 0)), (1, Drawing.gray(0, 0.16))]),
                      from: CGPoint(x: rect.minX, y: rect.minY), to: CGPoint(x: rect.maxX, y: rect.maxY))
+        if case .wood = material {
+            // Fotoet er en mat diffuse map: lidt mørkere og varmere, vignet mod kanterne og lak ovenpå.
+            ctx.saveGState()
+            ctx.setBlendMode(.multiply)
+            ctx.setFillColor(Drawing.color(0.86, 0.80, 0.76))
+            ctx.fill(rect)
+            ctx.restoreGState()
+            let c = CGPoint(x: rect.midX, y: rect.midY)
+            ctx.drawRadialGradient(Drawing.gradient([(0, Drawing.gray(0, 0)), (0.65, Drawing.gray(0, 0.05)), (1, Drawing.gray(0, 0.32))]),
+                                   startCenter: c, startRadius: 0, endCenter: c, endRadius: hypot(rect.width, rect.height) / 2,
+                                   options: [.drawsAfterEndLocation])
+            // Lak: et svagt, bredt skær på skrå.
+            Drawing.fill(ctx, CGPath(rect: rect, transform: nil),
+                         Drawing.gradient([(0.0, Drawing.gray(1, 0)), (0.28, Drawing.gray(1, 0.05)), (0.40, Drawing.gray(1, 0.0)),
+                                           (1, Drawing.gray(1, 0))]),
+                         from: CGPoint(x: rect.minX, y: rect.minY), to: CGPoint(x: rect.maxX, y: rect.maxY))
+        }
         if case .black = material {
             // Blank lak: en blød diagonal glans.
             Drawing.fill(ctx, CGPath(rect: rect, transform: nil),
@@ -239,5 +259,66 @@ enum PlinthRenderer {
         NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: true)
         str.draw(at: CGPoint(x: c.x - b.width / 2, y: c.y - b.height / 2))
         NSGraphicsContext.restoreGraphicsState()
+    }
+}
+
+
+/// Valnøddefinér tegnet i kode. Modellen er en træstamme skåret på langs:
+/// årringene er afstanden til en marvlinje under brættet, og snittets dybde bølger langs brættet,
+/// så ringene bliver til "katedraler" og flammer. Turbulens forvrider ringene, ringafstanden varierer,
+/// sentræet er mørkere, porerne er små aflange streger, figuren giver et svagt skær, og der er to små knaster.
+struct WoodVeneer {
+    let early: SIMD3<Float>
+    let late: SIMD3<Float>
+    private let n1 = ValueNoise(seed: 7), n2 = ValueNoise(seed: 31), n3 = ValueNoise(seed: 101), n4 = ValueNoise(seed: 57)
+    private let knots: [(x: Float, y: Float, r: Float, s: Float)] = [(34, 118, 3.2, 9), (121, 38, 2.4, 7), (220, 96, 3.0, 8)]
+
+    init(species: WoodSpecies) {
+        switch species {
+        case .walnut: early = SIMD3(0.40, 0.25, 0.15); late = SIMD3(0.16, 0.088, 0.05)
+        case .oak: early = SIMD3(0.80, 0.64, 0.44); late = SIMD3(0.55, 0.38, 0.22)
+        }
+    }
+
+    /// u, v i "lille-størrelse-punkter" (kroppen er ≈148 høj).
+    func color(_ u: Float, _ v: Float) -> SIMD3<Float> {
+        // turbulens: forvrid koordinaterne lidt før ringene beregnes
+        let tu = (n2.fbm(u * 0.005, v * 0.018, octaves: 4) - 0.5)
+        let tv = (n1.fbm(u * 0.004 + 9, v * 0.03, octaves: 4) - 0.5)
+        let pv = v + tv * 16
+        // snittets dybde i stammen bølger langs brættet → katedraler
+        let z = 58 + 46 * sin(u * 0.016 + tu * 2.5) + (n1.fbm(u * 0.003, 3.3, octaves: 3) - 0.5) * 40
+        let dy = pv - 232
+        var r = (dy * dy + z * z).squareRoot()
+        // knaster bøjer ringene
+        var knotCore: Float = 0
+        for k in knots {
+            let dx = u - k.x, dk = v - k.y
+            let d2 = dx * dx * 0.35 + dk * dk
+            r += k.s * exp(-d2 / (k.r * k.r * 9))
+            knotCore = max(knotCore, exp(-(dx * dx + dk * dk) / (k.r * k.r)))
+        }
+        // ujævn ringafstand
+        let R = r + (n3.fbm(r * 0.035, 7.0, octaves: 3) - 0.5) * 26
+        let ringF = R / 6.2
+        let idx = ringF.rounded(.down)
+        let p = ringF - idx
+        let ringDark = n3.hash(Int32(idx), 9)
+        let lateBand = smoothstep(0.50, 0.90, p) * (1 - smoothstep(0.95, 1.0, p))
+        // porer: små aflange streger langs åren, flest i forårsveddet
+        let poreN = n4.value(u * 0.32, v * 4.2)
+        let pores = smoothstep(0.80, 0.94, poreN) * (1 - 0.6 * lateBand)
+        let fibre = n2.value(u * 0.045, v * 3.2) - 0.5
+        let tone = n1.fbm(u * 0.0028 + 20, v * 0.011, octaves: 3)
+        var c = mix(early, late, lateBand * (0.50 + 0.50 * ringDark))
+        c = mix(c, late * 0.7, pores * 0.5)
+        c *= 1 + fibre * 0.10
+        c *= 0.80 + 0.40 * tone
+        // figur og skær (chatoyance): bløde lyse/mørke bånd på tværs af åren
+        let fig = sin(u * 0.13 + (n4.fbm(u * 0.012, v * 0.06, octaves: 3) - 0.5) * 10 + v * 0.025)
+        c *= 1 + 0.075 * fig
+        // knastkerner
+        c = mix(c, late * 0.55, min(1, knotCore * 1.2))
+        return c
     }
 }

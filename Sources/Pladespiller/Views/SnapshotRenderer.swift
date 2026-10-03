@@ -14,23 +14,37 @@ enum SnapshotRenderer {
         var size: WidgetSize = .medium
         var theme: TurntableTheme = .wood
         var dark = true
-        var titleStyle: TitleStyle = .ellipsis
+        var titleStyle: TitleStyle = .marquee
         var marqueePhase: Double? = nil
+        var dim: Double = 0
+        var hover = false
+        var problem: SourceAccessProblem? = nil
+        /// Baggrund: neutral flade (som widgettens uigennemsigtige flade) eller "skrivebord" med dæmpet, gennemsigtig flade.
+        var desktop = false
         var caption: String = ""
     }
 
     static let base = Date(timeIntervalSinceReferenceDate: 800_000_000)
-    static func np(_ i: Int, playing: Bool = true, progress: Double, at t: Double) -> NowPlaying {
-        MockNowPlayingSource.sample(i, isPlaying: playing, progress: progress, at: base.addingTimeInterval(t))
+    /// QA K7: snapshots bruger et midlertidigt UserDefaults-domæne, som slettes bagefter.
+    static let defaultsSuite = "pladespiller.snapshots.\(ProcessInfo.processInfo.processIdentifier)"
+
+    static func np(_ i: Int, playing: Bool = true, progress: Double, at t: Double, app: String? = nil) -> NowPlaying {
+        var n = MockNowPlayingSource.sample(i, isPlaying: playing, progress: progress, at: base.addingTimeInterval(t))
+        if let app { n.sourceAppBundleID = app }
+        return n
     }
 
     static func run(outputDirectory dir: URL) {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { UserDefaults.standard.removePersistentDomain(forName: defaultsSuite) }
         let started = Date()
+        woodCloseUp(dir)
+        if ProcessInfo.processInfo.environment["PLADESPILLER_SNAPSHOT_ONLY_WOOD"] == "1" { return }
+        let music = NowPlaying.BundleID.music
 
-        // Basis: alle tre størrelser i standardtilstand (bevarer de gamle filnavne).
+        // Basis: alle tre størrelser i standardtilstand.
         for size in WidgetSize.allCases {
-            write(scene(Scene(name: "widget-\(size.rawValue)", events: [(0, np(0, progress: 0.3, at: 0))], time: 4, size: size)),
+            write(scene(Scene(name: "widget-\(size.rawValue)", events: [(0, np(0, progress: 0.3, at: 0, app: music))], time: 4, size: size)),
                   to: dir.appendingPathComponent("widget-\(size.rawValue).png"))
         }
 
@@ -44,7 +58,7 @@ enum SnapshotRenderer {
         }
         sheet("01-afspil", playing, dir: dir, columns: 2)
 
-        // 2. Pause og afspil igen (armen løftes, glider til hvile; omvendt)
+        // 2. Pause og afspil igen
         let pauseEvents: [(Double, NowPlaying?)] = [(0, np(0, progress: 0.4, at: 0)), (5, np(0, playing: false, progress: 0.4 + 5 / 238, at: 5)),
                                                     (8, np(0, playing: true, progress: 0.4 + 5 / 238, at: 8))]
         let pause = [4.9, 5.15, 5.4, 5.65, 6.3, 7.5, 8.2, 8.45, 8.7, 9.5].map { t in
@@ -56,50 +70,79 @@ enum SnapshotRenderer {
         // 3. Ny sang midt i overgangen
         let changeEvents: [(Double, NowPlaying?)] = [(0, np(0, progress: 0.97, at: 0)), (5, np(1, progress: 0, at: 5))]
         let change = [4.9, 5.12, 5.3, 5.45, 5.6, 5.75, 5.9, 6.5].map { t in
-            Scene(name: "ny-sang-\(t)", events: changeEvents, time: t, caption: String(format: "ny sang +%.2f s", t - 5))
+            Scene(name: "ny-sang-\(t)", events: changeEvents, time: t, caption: String(format: "ny sang %+.2f s", t - 5))
         }
         sheet("03-ny-sang", change, dir: dir, columns: 2)
 
-        // 4. Intet spiller, uden cover, lange titler
-        var misc: [Scene] = []
-        misc.append(Scene(name: "intet", events: [(0, np(0, progress: 0.4, at: 0)), (1, nil)], time: 4, caption: "intet spiller"))
-        misc.append(Scene(name: "intet-lille", events: [(0, nil)], time: 4, size: .small, caption: "intet spiller (lille)"))
-        misc.append(Scene(name: "uden-cover", events: [(0, np(2, progress: 0.2, at: 0))], time: 3, caption: "uden cover"))
-        misc.append(Scene(name: "uden-cover-lys", events: [(0, np(2, progress: 0.2, at: 0))], time: 3, dark: false, caption: "uden cover, lys"))
+        // 4. Tilstande: intet, uden cover, manglende adgang, tom titel/kunstner
+        var blank = np(1, progress: 0.3, at: 0, app: music)
+        blank.title = ""; blank.artist = ""
+        let problem = SourceAccessProblem(bundleID: NowPlaying.BundleID.spotify, message: "Giv adgang til Spotify i Systemindstillinger")
+        let misc: [Scene] = [
+            Scene(name: "intet", events: [(0, np(0, progress: 0.4, at: 0)), (1, nil)], time: 4, caption: "intet spiller"),
+            Scene(name: "intet-lille", events: [(0, nil)], time: 4, size: .small, caption: "intet spiller (lille)"),
+            Scene(name: "uden-cover", events: [(0, np(2, progress: 0.2, at: 0))], time: 3, caption: "uden cover"),
+            Scene(name: "uden-cover-lys", events: [(0, np(2, progress: 0.2, at: 0))], time: 3, dark: false, caption: "uden cover, lys"),
+            Scene(name: "adgang", events: [(0, np(0, playing: false, progress: 0.4, at: 0))], time: 3, problem: problem, caption: "manglende adgang"),
+            Scene(name: "adgang-intet", events: [(0, nil)], time: 3, problem: problem, caption: "manglende adgang, intet"),
+            Scene(name: "adgang-lille", events: [(0, nil)], time: 3, size: .small, problem: problem, caption: "manglende adgang (lille)"),
+            Scene(name: "tom-titel", events: [(0, blank)], time: 3, caption: "tom titel og kunstner (Musik)"),
+        ]
         sheet("04-tilstande", misc, dir: dir, columns: 2)
 
+        // 5. Rulletekst (standard) og "…" til sammenligning
+        let long = np(2, progress: 0.2, at: 0, app: music)
         let titles: [Scene] = [
-            Scene(name: "titel-ellipse", events: [(0, np(2, progress: 0.2, at: 0))], time: 3, caption: "A: \"…\" (2 linjer)"),
-            Scene(name: "titel-rul-0", events: [(0, np(2, progress: 0.2, at: 0))], time: 3, titleStyle: .marquee, marqueePhase: 0,
-                  caption: "B: rulletekst, start"),
-            Scene(name: "titel-rul-40", events: [(0, np(2, progress: 0.2, at: 0))], time: 3, titleStyle: .marquee, marqueePhase: 0.4,
-                  caption: "B: rulletekst, undervejs"),
-            Scene(name: "titel-ellipse-lys", events: [(0, np(2, progress: 0.2, at: 0))], time: 3, dark: false, caption: "A: \"…\", lys"),
+            Scene(name: "rul-0", events: [(0, long)], time: 3, marqueePhase: 0, caption: "rulletekst: pause ved start"),
+            Scene(name: "rul-30", events: [(0, long)], time: 3, marqueePhase: 0.3, caption: "rulletekst undervejs"),
+            Scene(name: "rul-80", events: [(0, long)], time: 3, marqueePhase: 0.8, caption: "rulletekst næsten forfra"),
+            Scene(name: "rul-lys", events: [(0, long)], time: 3, dark: false, marqueePhase: 0.3, caption: "rulletekst, lys"),
+            Scene(name: "rul-stor", events: [(0, long)], time: 3, size: .large, marqueePhase: 0.3, caption: "rulletekst, stor"),
+            Scene(name: "ellipse", events: [(0, long)], time: 3, titleStyle: .ellipsis, caption: "\"…\" (ikke standard)"),
         ]
-        sheet("05-lange-titler", titles, dir: dir, columns: 2)
+        sheet("05-rulletekst", titles, dir: dir, columns: 2)
 
-        // 5. Størrelser × temaer × lys/mørk
+        // 6. Størrelser × temaer × lys/mørk
         for dark in [true, false] {
             var scenes: [Scene] = []
             for theme in TurntableTheme.allCases {
                 for size in WidgetSize.allCases {
-                    scenes.append(Scene(name: "\(size.rawValue)-\(theme.rawValue)", events: [(0, np(theme == .auto ? 1 : 0, progress: 0.3, at: 0))],
+                    scenes.append(Scene(name: "\(size.rawValue)-\(theme.rawValue)", events: [(0, np(theme == .auto ? 1 : 0, progress: 0.3, at: 0, app: music))],
                                         time: 4, size: size, theme: theme, dark: dark, caption: "\(theme.title) · \(size.title)"))
                 }
             }
             sheet(dark ? "06-temaer-moerk" : "07-temaer-lys", scenes, dir: dir, columns: 3)
         }
 
-        // 6. Store enkeltbilleder til at se detaljer
-        write(scene(Scene(name: "stor-trae", events: [(0, np(0, progress: 0.35, at: 0))], time: 4, size: .large)), to: dir.appendingPathComponent("detalje-stor-trae.png"), scale: 3)
-        write(scene(Scene(name: "stor-pause", events: [(0, np(1, playing: false, progress: 0.35, at: 0))], time: 4, size: .large)), to: dir.appendingPathComponent("detalje-stor-pause.png"), scale: 3)
-        write(scene(Scene(name: "mellem-trae", events: [(0, np(0, progress: 0.35, at: 0))], time: 4)), to: dir.appendingPathComponent("detalje-mellem-trae.png"), scale: 3)
-        let oak = TurntableStyle.woodSpecies
-        TurntableStyle.woodSpecies = .oak
-        write(scene(Scene(name: "mellem-eg", events: [(0, np(0, progress: 0.35, at: 0))], time: 4)), to: dir.appendingPathComponent("variant-lys-eg.png"), scale: 2)
-        TurntableStyle.woodSpecies = oak
+        // 7. Knapper og hover
+        let buttons: [Scene] = [
+            Scene(name: "lille-uden-hover", events: [(0, np(0, progress: 0.3, at: 0))], time: 4, size: .small, caption: "lille, mus ikke over"),
+            Scene(name: "lille-hover", events: [(0, np(0, progress: 0.3, at: 0))], time: 4, size: .small, hover: true, caption: "lille, mus over (spiller)"),
+            Scene(name: "lille-hover-pause", events: [(0, np(0, playing: false, progress: 0.3, at: 0))], time: 4, size: .small, hover: true, caption: "lille, mus over (pause)"),
+            Scene(name: "mellem-spiller", events: [(0, np(0, progress: 0.3, at: 0, app: music))], time: 4, caption: "mellem, spiller"),
+            Scene(name: "mellem-pause", events: [(0, np(1, playing: false, progress: 0.3, at: 0, app: music))], time: 4, dark: false, caption: "mellem, pause, lys"),
+            Scene(name: "stor-spiller", events: [(0, np(1, progress: 0.42, at: 0, app: music))], time: 4, size: .large, caption: "stor, spiller"),
+            Scene(name: "stor-pause-lys", events: [(0, np(0, playing: false, progress: 0.42, at: 0, app: music))], time: 4, size: .large, dark: false, caption: "stor, pause, lys"),
+        ]
+        sheet("08-knapper-hover", buttons, dir: dir, columns: 3)
 
-        // 7. Vinkler som tal for op- og nedbremsning (kontinuitet)
+        // 8. Dæmpet mod fuld farve (dæmpet flade er gennemsigtig over sløret skrivebord)
+        var dimmed: [Scene] = []
+        for (size, dark) in [(WidgetSize.medium, true), (.medium, false), (.small, true), (.large, true)] {
+            for d in [0.0, 0.5, 1.0] {
+                dimmed.append(Scene(name: "daemp-\(size.rawValue)-\(d)", events: [(0, np(0, progress: 0.3, at: 0, app: music))], time: 4,
+                                    size: size, dark: dark, dim: d, desktop: true,
+                                    caption: "\(size.title)\(dark ? "" : ", lys"): dæmpning \(Int(d * 100)) %"))
+            }
+        }
+        sheet("09-daempning", dimmed, dir: dir, columns: 3)
+
+        // 9. Store enkeltbilleder
+        write(scene(Scene(name: "stor-trae", events: [(0, np(0, progress: 0.35, at: 0, app: music))], time: 4, size: .large)),
+              to: dir.appendingPathComponent("detalje-stor-trae.png"), scale: 3)
+        write(scene(Scene(name: "mellem-trae", events: [(0, np(0, progress: 0.35, at: 0, app: music))], time: 4)),
+              to: dir.appendingPathComponent("detalje-mellem-trae.png"), scale: 3)
+
         spinReport(to: dir.appendingPathComponent("spin-vinkler.txt"))
         armReport(to: dir.appendingPathComponent("arm-vinkler.txt"))
         caCheck(to: dir.appendingPathComponent("ca-tjek.txt"))
@@ -122,26 +165,42 @@ enum SnapshotRenderer {
     }
 
     static func scene(_ s: Scene) -> some View {
-        let settings = Settings(defaults: UserDefaults(suiteName: "pladespiller.snapshots")!)
+        let settings = Settings(defaults: UserDefaults(suiteName: defaultsSuite)!)
         settings.size = s.size
         settings.theme = s.theme
         let store = NowPlayingStore(sources: [FixedSource(current(for: s))])
         store.start()
+        let presentation = WidgetPresentation()
+        presentation.dimAmount = s.dim
+        presentation.isHovering = s.hover
         let body = WidgetMetrics.bodySize(for: s.size)
+        let scheme: ColorScheme = s.dark ? .dark : .light
+        let shape = RoundedRectangle(cornerRadius: WidgetMetrics.cornerRadius, style: .continuous)
         return WidgetView()
             .frame(width: body.width, height: body.height)
-            .background(s.dark ? Color(white: 0.14) : Color(white: 0.94))
-            .clipShape(RoundedRectangle(cornerRadius: WidgetMetrics.cornerRadius, style: .continuous))
+            .background {
+                if s.desktop {
+                    // Som Vinduets dæmpede flade: baggrundens opacitet falder mod dimBackgroundOpacity.
+                    WidgetBackground(scheme: scheme).opacity(1 - (1 - WidgetMetrics.dimBackgroundOpacity) * s.dim)
+                } else {
+                    WidgetBackground(scheme: scheme)
+                }
+            }
+            .clipShape(shape)
+            .padding(s.desktop ? 8 : 0)
+            .background { if s.desktop { FakeDesktop(dark: s.dark).clipped() } }
             .environment(settings)
             .environment(store)
-            .environment(\.turntableSnapshot, TurntableSnapshotPose(pose: pose(for: s)))
+            .environment(\.widgetPresentation, presentation)
+            .environment(\.turntableSnapshot, TurntableSnapshotPose(pose: pose(for: s), dim: s.dim))
             .environment(\.titleStyle, s.titleStyle)
             .environment(\.marqueePhase, s.marqueePhase)
-            .environment(\.colorScheme, s.dark ? .dark : .light)
+            .environment(\.snapshotAccessProblem, s.problem)
+            .environment(\.colorScheme, scheme)
             .environment(\.displayScale, 2)
     }
 
-    /// Kontaktark: flere scener i et gitter med billedtekst (så man kan se dem på én gang).
+    /// Kontaktark: flere scener i et gitter med billedtekst.
     static func sheet(_ name: String, _ scenes: [Scene], dir: URL, columns: Int) {
         let rows = stride(from: 0, to: scenes.count, by: columns).map { Array(scenes[$0..<min($0 + columns, scenes.count)]) }
         let view = VStack(alignment: .leading, spacing: 14) {
@@ -253,6 +312,24 @@ enum SnapshotRenderer {
 }
 
 extension SnapshotRenderer {
+    /// Nærbillede af træet: den store krop (foto + lys, lak, kant) i 4× skala, et udsnit, og det tegnede reservetræ.
+    static func woodCloseUp(_ dir: URL) {
+        let g = TurntableGeometry(size: CGSize(width: 328, height: WidgetView.largeTurntableHeight), cornerRadius: 20)
+        let style = TurntableStyle(plinth: .wood(.walnut), darkHardware: false)
+        print(WoodTexture.findFile().map { "Træfoto: \($0.path)" } ?? "Intet træfoto fundet – bruger tegnet træ")
+        func save(_ img: CGImage?, _ name: String) {
+            guard let img, let png = NSBitmapImageRep(cgImage: img).representation(using: .png, properties: [:]) else { return }
+            try? png.write(to: dir.appendingPathComponent(name))
+        }
+        let plinth = PlinthRenderer.image(g, style: style, scale: 4)
+        save(plinth, "trae-naerbillede.png")
+        save(plinth?.cropping(to: CGRect(x: 0, y: 0, width: 700, height: 520)), "trae-udsnit.png")
+        let veneer = WoodVeneer(species: .walnut)
+        save(Drawing.pixels(size: CGSize(width: 160, height: 120), scale: 4) { x, y in
+            let c = veneer.color(x, y); return SIMD4(c.x, c.y, c.z, 1)
+        }, "trae-reserve-tegnet.png")
+    }
+
     /// Tjekker live-vejen uden vindue: lægger CA-animationerne ind og sammenligner keyframes med den analytiske pose.
     static func caCheck(to url: URL) {
         let g = TurntableGeometry(size: CGSize(width: 148, height: 148), cornerRadius: 20)
@@ -292,8 +369,29 @@ extension SnapshotRenderer {
                 lines.append(String(format: "  arm-keyframe %d: %.4f rad, analytisk %.4f rad", mid, -vals[mid], a.pose(at: tm).armAngle))
             }
         }
+        // Rulletekst: CA-animation mens der spilles, ingen ved pause.
+        let mq = MarqueeNSView(frame: NSRect(x: 0, y: 0, width: 170, height: 20))
+        let strip = MarqueeStrip(text: "En meget lang sangtitel der slet ikke kan være på én linje", size: 15, dark: true, scale: 2)
+        mq.update(strip: strip, textWidth: 420, height: 20, active: true)
+        lines.append("Rulletekst spiller: animationer = \(mq.debugAnimationKeys)")
+        mq.update(strip: strip, textWidth: 420, height: 20, active: false)
+        lines.append("Rulletekst pause: animationer = \(mq.debugAnimationKeys)")
         try? lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
         print(lines.joined(separator: "\n"))
+    }
+}
+
+/// Et skrivebord bag den dæmpede, gennemsigtige flade: farverigt og sløret (som macOS' sløring bag widgets).
+private struct FakeDesktop: View {
+    let dark: Bool
+    var body: some View {
+        ZStack {
+            LinearGradient(colors: dark ? [Color(red: 0.10, green: 0.16, blue: 0.32), Color(red: 0.35, green: 0.18, blue: 0.30)]
+                                        : [Color(red: 0.62, green: 0.76, blue: 0.92), Color(red: 0.95, green: 0.80, blue: 0.70)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+            Circle().fill(dark ? Color(red: 0.9, green: 0.5, blue: 0.2).opacity(0.5) : Color.white.opacity(0.7))
+                .frame(width: 160).offset(x: 60, y: -40).blur(radius: 30)
+        }
     }
 }
 

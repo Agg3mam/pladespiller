@@ -28,21 +28,22 @@ final class ImageCache {
 /// Hvad der står på etiketten.
 enum LabelContent: Equatable {
     case blank
-    case cover(key: String, image: NSImage)
+    case cover(key: String, image: NSImage, title: String, artist: String)
     case text(key: String, title: String, artist: String)
 
     var cacheKey: String {
         switch self {
         case .blank: "blank"
-        case .cover(let key, let image): "cover|\(key)|\(ObjectIdentifier(image).hashValue)"
+        case .cover(let key, let image, _, _): "cover|\(key)|\(ObjectIdentifier(image).hashValue)"
         case .text(let key, _, _): "text|\(key)"
         }
     }
 
     init(_ np: NowPlaying?) {
         guard let np else { self = .blank; return }
-        if let art = np.artwork { self = .cover(key: np.trackKey, image: art) }
-        else { self = .text(key: np.trackKey, title: np.title, artist: np.artist) }
+        let title = TrackStrings.title(np), artist = TrackStrings.artist(np)
+        if let art = np.artwork { self = .cover(key: np.trackKey, image: art, title: title, artist: artist) }
+        else { self = .text(key: np.trackKey, title: title, artist: artist) }
     }
 }
 
@@ -51,7 +52,7 @@ enum LabelContent: Equatable {
 enum TurntableImages {
     static let shared = ImageCache(capacity: 28)
     /// Seneste par runde etiketter (covers skifter; gamle smides ud, ingen læk).
-    static let labels = ImageCache(capacity: 4)
+    static let labels = ImageCache(capacity: 8)   // 4 etiketter + deres gråtonekopier
 
     static func key(_ name: String, _ g: TurntableGeometry, _ scale: CGFloat) -> String {
         "\(name)|\(g.size.width)x\(g.size.height)|r\(g.cornerRadius)|@\(scale)"
@@ -86,6 +87,17 @@ enum TurntableImages {
 
     static func ledGlow(_ g: TurntableGeometry, _ scale: CGFloat) -> CGImage? {
         shared.image(key("led", g, scale)) { RecordRenderer.ledGlow(g, scale: scale) }
+    }
+
+    /// Gråtonekopi af et billede fra cachen (dæmpet look).
+    static func gray(_ name: String, _ g: TurntableGeometry, _ scale: CGFloat, _ image: CGImage?) -> CGImage? {
+        guard let image else { return nil }
+        return shared.image(key("gray|" + name, g, scale)) { Drawing.grayscale(image) }
+    }
+
+    static func grayLabel(_ content: LabelContent, _ g: TurntableGeometry, _ scale: CGFloat) -> CGImage? {
+        guard let color = label(content, g, scale) else { return nil }
+        return labels.image("gray|\(content.cacheKey)|\(g.labelRadius)|@\(scale)") { Drawing.grayscale(color) }
     }
 
     static func label(_ content: LabelContent, _ g: TurntableGeometry, _ scale: CGFloat) -> CGImage? {
@@ -266,12 +278,16 @@ enum LabelRenderer {
             ctx.saveGState()
             ctx.addPath(Drawing.circle(c, lr)); ctx.clip()
             switch content {
-            case .cover(_, let image):
-                if let cg = Drawing.cgImage(image) {
+            case .cover(_, let image, let title, let artist):
+                if let cg = Drawing.cgImage(image), cg.width > 0, cg.height > 0 {
                     let w = CGFloat(cg.width), h = CGFloat(cg.height)
                     let k = side / min(w, h)
                     let rect = CGRect(x: c.x - w * k / 2, y: c.y - h * k / 2, width: w * k, height: h * k)
                     PlinthRenderer.drawUpright(ctx, cg, in: rect)
+                } else {
+                    // QA M5: coveret kan ikke læses → tekst-etiket i stedet for en sort etiket.
+                    paper(ctx, c, lr, tint: 1)
+                    drawLabelText(ctx, title: title, artist: artist, c: c, lr: lr)
                 }
             case .text(_, let title, let artist):
                 paper(ctx, c, lr, tint: 1)
