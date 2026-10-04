@@ -83,3 +83,4 @@ En agent ændrer kun sine egne filer. Ændringer i fælles filer bestilles hos h
 - **2026-10-04 · Polish flettet** (grafik 5c18b34, vindue 9b03c52): fast layoutgitter (`Views/Layout.swift`: padding 16, objectInset 8, gap 12), pixel-layouttjek, valgbar hastighed + 33/45-knapper, menu ▸ Hastighed. Stor har 4 varianter bag `LargeLayout` (classic standard, A helt træ, B centreret, C plade+cover) — afventer brugerens valg.
 - **2026-10-04 · Stor = A "Helt træ"** (brugerens valg; grafik cc88598). Øvrige varianter fjernet. Aktiv 33/45-knap lyser orange.
 - **2026-10-04 · Spoling:** `NowPlayingSource.seek(to:)` (standard no-op), `NowPlayingStore.seek(to:)`; mock implementerer. Musikdata: Spotify/Musik. Grafik: klik/træk på fremdriftslinjen.
+- **2026-10-04 · Spoling flettet** (musik 0d3464b: core/setd på pPos til pid, coalescing 100 ms; grafik 648a654: `Views/SeekBar.swift`, klik/træk, claim ved mouseDown).
