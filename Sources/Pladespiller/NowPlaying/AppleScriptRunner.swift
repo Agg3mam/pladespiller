@@ -59,16 +59,22 @@ nonisolated struct ScriptError: Error, Sendable, CustomStringConvertible {
 }
 
 /// Reserve: kører AppleScript-tekst (bruges kun med `--applescript` / `PLADESPILLER_APPLESCRIPT=1`,
-/// hvis pid-adresserede Apple Events skulle drille). Samme serielle kø som `AppleEventQueue`, så
-/// NSAppleScript aldrig bruges fra to tråde. Scripts kompileres først, når appen kører.
+/// hvis pid-adresserede Apple Events skulle drille). Egen seriel kø, så NSAppleScript (ikke
+/// trådsikker) aldrig bruges fra to tråde. Scripts kompileres først, når appen kører.
+///
+/// KENDT BEGRÆNSNING (QA N11): reserven har stadig kapløbet "is running → tell". Lukker appen
+/// mellem `is running` og et af scriptets events, kan macOS starte den igen, fordi AppleScript
+/// adresserer appen via bundle-id og ikke via pid. Det accepteres, fordi det kun er en reserve.
+/// Fjernes, når live-testen har bevist, at pid-vejen (`AppleEventClient.swift`) virker.
 nonisolated final class AppleScriptRunner: @unchecked Sendable {
     static let shared = AppleScriptRunner()
 
     private var compiled: [String: NSAppleScript] = [:]   // kun på køen
+    private let queue = DispatchQueue(label: "dk.holgerskov.Pladespiller.applescript", qos: .userInitiated)
 
     func run(_ source: String) async -> Timed<ScriptValue> {
         await withCheckedContinuation { (cont: CheckedContinuation<Timed<ScriptValue>, Never>) in
-            AppleEventQueue.shared.queue.async {
+            self.queue.async {
                 let started = Date()
                 let r = self.runOnQueue(source)
                 cont.resume(returning: Timed(result: r, started: started, finished: Date()))
@@ -102,9 +108,9 @@ nonisolated final class AppleScriptRunner: @unchecked Sendable {
     }
 }
 
-/// Bygger scripts der aldrig starter appen: alt pakkes ind i `if application id … is running`.
-/// (Swift tjekker også med NSRunningApplication før hvert kald; AppleScript-tjekket lukker
-/// kapløbet hvor appen lukker lige før kaldet.)
+/// Bygger reserve-scripts pakket ind i `if application id … is running` (Swift tjekker også med
+/// NSRunningApplication før hvert kald). Det gør kapløbet lille, men lukker det ikke helt; se
+/// `AppleScriptRunner` (QA N11).
 nonisolated enum AppleScriptTemplate {
     static func guarded(bundleID: String, timeout: Int = 3, body: String, otherwise: String = "return {\"notrunning\"}") -> String {
         """
