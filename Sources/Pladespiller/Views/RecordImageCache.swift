@@ -50,12 +50,12 @@ enum LabelContent: Equatable {
 /// Alle billeder til pladespilleren. Tegnes én gang pr. størrelse/skala/tema og genbruges.
 /// Kun billederne drejes/flyttes bagefter (riller tegnes aldrig pr. billede).
 enum TurntableImages {
-    static let shared = ImageCache(capacity: 28)
+    static let shared = ImageCache(capacity: 36)
     /// Seneste par runde etiketter (covers skifter; gamle smides ud, ingen læk).
     static let labels = ImageCache(capacity: 8)   // 4 etiketter + deres gråtonekopier
 
     static func key(_ name: String, _ g: TurntableGeometry, _ scale: CGFloat) -> String {
-        "\(name)|\(g.size.width)x\(g.size.height)|r\(g.cornerRadius)|@\(scale)"
+        "\(name)|\(g.size.width)x\(g.size.height)|r\(g.cornerRadius)|d\(g.deck.minX),\(g.deck.minY),\(g.deck.width)|@\(scale)"
     }
 
     static func plinth(_ g: TurntableGeometry, _ style: TurntableStyle, _ scale: CGFloat) -> CGImage? {
@@ -83,6 +83,10 @@ enum TurntableImages {
             guard let s = ArmRenderer.image(g, scale: scale, silhouette: true) else { return nil }
             return Drawing.blurred(s, radiusPx: max(1, g.h * 0.010 * scale))
         }
+    }
+
+    static func speedButton(_ g: TurntableGeometry, _ label: String, active: Bool, _ scale: CGFloat) -> CGImage? {
+        shared.image(key("speed\(label)|\(active)", g, scale)) { SpeedButtonRenderer.image(g, label: label, active: active, scale: scale) }
     }
 
     static func ledGlow(_ g: TurntableGeometry, _ scale: CGFloat) -> CGImage? {

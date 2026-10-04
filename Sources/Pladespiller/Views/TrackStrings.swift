@@ -43,9 +43,25 @@ enum SourceApp {
             source.draw(in: NSRect(x: 0, y: 0, width: px, height: px))
             NSGraphicsContext.restoreGraphicsState()
         }) else { missing.insert(bundleID); return nil }
-        let icon = NSImage(cgImage: cg, size: NSSize(width: 32, height: 32))
+        // Beskær til ikonets synlige flade (app-ikoner har gennemsigtig margen), så det flugter med teksten.
+        let cropped = inkCrop(cg) ?? cg
+        let icon = NSImage(cgImage: cropped, size: NSSize(width: 32, height: 32))
         icons[bundleID] = icon
         return icon
+    }
+
+    static func inkCrop(_ img: CGImage) -> CGImage? {
+        guard let data = img.dataProvider?.data, let p = CFDataGetBytePtr(data) else { return nil }
+        let bpr = img.bytesPerRow
+        var minX = img.width, minY = img.height, maxX = -1, maxY = -1
+        for y in 0..<img.height { for x in 0..<img.width where p[y * bpr + x * 4 + 3] > 40 {
+            minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y)
+        } }
+        guard maxX >= 0 else { return nil }
+        // kvadratisk udsnit om midten
+        let side = max(maxX - minX + 1, maxY - minY + 1)
+        let cx = (minX + maxX + 1) / 2, cy = (minY + maxY + 1) / 2
+        return img.cropping(to: CGRect(x: cx - side / 2, y: cy - side / 2, width: side, height: side))
     }
 
     static func name(for bundleID: String) -> String? {

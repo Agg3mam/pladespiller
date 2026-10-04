@@ -2,33 +2,44 @@ import CoreGraphics
 import Foundation
 
 /// Pladespillerens mål i punkter, y nedad, (0,0) = kroppens øverste venstre hjørne.
-/// Alt er proportionalt med kroppens højde `h`; ekstra bredde lægges ligeligt i begge sider.
+///
+/// Kroppen (`size`) kan være større end selve "dækket" (`deck`): det kvadrat hvor tallerken, arm og knapper ligger.
+/// Alt i dækket er proportionalt med dets side `h`. Standard: dækket er kvadratet midt i kroppen.
+/// Gitter: alle detaljer holder `margin` (= 7,5 % af h) til dækkets kanter. Pladen er lodret centreret.
 /// Vinkler er i radianer, med uret (y nedad), 0 = mod højre.
 struct TurntableGeometry: Hashable {
     let size: CGSize
     let cornerRadius: CGFloat
+    let deck: CGRect
 
-    init(size: CGSize, cornerRadius: CGFloat) {
+    init(size: CGSize, cornerRadius: CGFloat, deck: CGRect? = nil) {
         self.size = size
         self.cornerRadius = cornerRadius
+        let side = min(size.width, size.height)
+        self.deck = deck ?? CGRect(x: (size.width - side) / 2, y: (size.height - side) / 2, width: side, height: side)
     }
 
-    var h: CGFloat { size.height }
-    /// Vandret forskydning når kroppen er bredere end høj.
-    var ox: CGFloat { max(0, (size.width - size.height * 0.98) / 2) }
+    var h: CGFloat { deck.height }
+    private var dx: CGFloat { deck.minX }
+    private var dy: CGFloat { deck.minY }
+    /// Fast luft fra dækkets kant til alle detaljer (armbase, knapper, LED).
+    var margin: CGFloat { h * 0.075 }
 
-    // Tallerken og plade
-    var center: CGPoint { CGPoint(x: ox + h * 0.43, y: h * 0.52) }
-    var platterRadius: CGFloat { h * 0.385 }
-    var recordRadius: CGFloat { h * 0.370 }
-    var grooveOuterRadius: CGFloat { h * 0.355 }
-    var grooveInnerRadius: CGFloat { h * 0.178 }
-    var labelRadius: CGFloat { h * 0.145 }
+    // Tallerken og plade (lodret centreret)
+    var center: CGPoint { CGPoint(x: dx + h * 0.42, y: dy + h * 0.5) }
+    var platterRadius: CGFloat { h * 0.372 }
+    var recordRadius: CGFloat { h * 0.357 }
+    var grooveOuterRadius: CGFloat { h * 0.343 }
+    var grooveInnerRadius: CGFloat { h * 0.172 }
+    var labelRadius: CGFloat { h * 0.140 }
     var spindleRadius: CGFloat { h * 0.0105 }
     var holeRadius: CGFloat { h * 0.017 }
 
+    /// Lodret kolonne langs dækkets højre side: armbase og LED står over hinanden her.
+    var rightColumnX: CGFloat { deck.maxX - margin - basePlateRadius }
+
     // Pickuparm (lokale koordinater: omdrejningspunkt i (0,0), armen langs +x, +y = mod pladen i hvile)
-    var pivot: CGPoint { CGPoint(x: ox + h * 0.845, y: h * 0.19) }
+    var pivot: CGPoint { CGPoint(x: rightColumnX, y: dy + h * 0.235) }
     var tubeLength: CGFloat { h * 0.47 }
     var tubeWidth: CGFloat { max(2, h * 0.021) }
     var headshellLength: CGFloat { h * 0.088 }
@@ -109,11 +120,12 @@ struct TurntableGeometry: Hashable {
 
     private static var tables: [TurntableGeometry: [CGFloat]] = [:]
 
-    // Små detaljer på kroppen
-    var ledCenter: CGPoint { CGPoint(x: size.width - ox - h * 0.075, y: h * 0.915) }
+    // Små detaljer på dækket: på gitteret, nederst til højre, med `margin` til kanterne
+    var detailRowY: CGFloat { deck.maxY - margin - speedButtonRadius }
+    var ledCenter: CGPoint { CGPoint(x: rightColumnX, y: detailRowY) }
     var ledRadius: CGFloat { max(1.6, h * 0.0115) }
     var speedButtons: [CGPoint] {
-        [CGPoint(x: size.width - ox - h * 0.275, y: h * 0.915), CGPoint(x: size.width - ox - h * 0.185, y: h * 0.915)]
+        [CGPoint(x: rightColumnX - h * 0.19, y: detailRowY), CGPoint(x: rightColumnX - h * 0.095, y: detailRowY)]
     }
     var speedButtonRadius: CGFloat { h * 0.03 }
 }
