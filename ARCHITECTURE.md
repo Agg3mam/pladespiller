@@ -76,3 +76,5 @@ En agent ændrer kun sine egne filer. Ændringer i fælles filer bestilles hos h
   hovedagenten samlede dem i `Shared/DistributedObserver.swift` (init(names:handler:), init(name:handler:), init(names:onChange:)).
   Musik sender nu rå Apple Events til pid (kan aldrig starte appen); NSAppleScript-reserve med `--applescript`. Log: `--log` → `~/Library/Logs/Pladespiller/nowplaying.log`.
   Dæmpning: "Automatisk" følger Apples Widgetstil (widgetAppearance 1 = Fuld farve → ingen dæmpning), ellers Finder-reglen.
+- **2026-10-04 · QA-rettelser efter bølge 2 flettet** (musik 364870a, vindue 5a2a1a4, grafik 30e3e80). N2 (etiket én sang bagud) bekræftet rettet live af hovedagenten
+  med billeder af løkken; N1 (dæmpning) bevist i det lag der sidder i viewet. Placering gemmes nu som øverste venstre hjørne.
