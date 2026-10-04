@@ -104,6 +104,24 @@ enum NowPlayingSelfTest {
         }
         expect(counting.loads == 1 && counting.current?.artwork == nil, "Intet cover huskes: kun ét cover-kald for samme sang (\(counting.loads))")
 
+        // N6: hver app har sin egen kø – en hængende Spotify blokerer ikke Musik
+        let qa = AppleEventQueue(label: "test-a"), qb = AppleEventQueue(label: "test-b")
+        var bDone: Date?, aDone: Date?
+        let t0q = Date()
+        Task { _ = await qa.run(pid: getpid()) { _ in Thread.sleep(forTimeInterval: 0.6); return 0 }; aDone = Date() }
+        Task { _ = await qb.run(pid: getpid()) { _ in 0 }; bDone = Date() }
+        while aDone == nil, Date().timeIntervalSince(t0q) < 3 { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
+        expect(bDone.map { $0.timeIntervalSince(t0q) < 0.3 } == true && aDone != nil,
+               "Separate køer: Musik venter ikke på en hængende Spotify")
+        expect(AETarget(pid: getpid()).timeout <= 3, "Status-timeout ≤ 3 s")
+
+        // N7: korte tekster til widgetten
+        for app in ["Spotify", "Musik"] {
+            let ask = PlayerAppSource.askingMessage(app), deny = PlayerAppSource.deniedMessage(app)
+            expect(ask.count <= 26 && deny.count <= 46 && !deny.contains("Anonymitet"),
+                   "Kort adgangstekst: “\(ask)” / “\(deny)”")
+        }
+
         // Scripts starter aldrig appen
         for (name, src) in [("Spotify status", SpotifySource.statusScriptSource), ("Musik status", MusicSource.statusScriptSource),
                             ("Musik cover", MusicSource.artworkScriptSource),

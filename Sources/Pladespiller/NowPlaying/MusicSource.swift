@@ -152,7 +152,7 @@ final class MusicSource: PlayerAppSource {
             outcome = await AppleScriptRunner.shared.run(Self.artworkScriptSource)
         } else {
             guard let p = runningPID else { return .none }
-            outcome = await AppleEventQueue.shared.run(pid: p, Self.fetchArtwork)
+            outcome = await events.run(pid: p, Self.fetchArtwork)
         }
         guard case .success(let v) = outcome.result else {
             if case .failure(let e) = outcome.result { NowPlayingLog.log("[musik] cover fejlede: \(e)") }

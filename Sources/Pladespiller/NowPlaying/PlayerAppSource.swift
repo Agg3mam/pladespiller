@@ -102,11 +102,14 @@ class PlayerAppSource: NowPlayingSource, AccessReporting {
     private var fetchInFlight = false
     private var fetchPending = false
     private var access: AccessState?
+    /// Egen seriel kø til denne apps Apple Events (QA N6).
+    let events: AppleEventQueue
 
     init(bundleID: String, shortName: String, displayName: String) {
         self.bundleID = bundleID
         self.shortName = shortName
         self.displayName = displayName
+        events = AppleEventQueue(label: shortName)
     }
 
     var runningPID: pid_t? {
@@ -204,13 +207,12 @@ class PlayerAppSource: NowPlayingSource, AccessReporting {
     private func ensureAccess() async -> Bool {
         if Self.useAppleScript || access == .granted { return true }
         guard let pid = runningPID else { return false }
-        let check = await AppleEventQueue.shared.run(pid: pid) { t in t.permission(ask: false) }
-        var state = (try? check.result.get()) ?? .unknown(-1)
+        var state = await AppleEventQueue.permission(pid: pid, ask: false)
         if state == .notDetermined {
-            NowPlayingLog.log("[\(shortName)] tilladelse: ikke spurgt endnu – macOS spørger nu")
-            setAccessProblem("Tillad Pladespiller at styre \(displayName) i vinduet fra macOS")
-            let asked = await AppleEventQueue.shared.run(pid: pid) { t in t.permission(ask: true) }
-            state = (try? asked.result.get()) ?? .unknown(-1)
+            NowPlayingLog.log("[\(shortName)] tilladelse: ikke spurgt endnu – macOS viser nu vinduet "
+                + "“Pladespiller vil styre \(displayName)”")
+            setAccessProblem(Self.askingMessage(displayName))
+            state = await AppleEventQueue.permission(pid: pid, ask: true)
         }
         return handleAccess(state)
     }
@@ -228,13 +230,15 @@ class PlayerAppSource: NowPlayingSource, AccessReporting {
             return true
         case .denied:
             if changed {
-                NowPlayingLog.log("[\(shortName)] tilladelse: AFVIST – bruger kun notifikationer; tjekker igen hvert 10. s (uden vindue)")
+                NowPlayingLog.log("[\(shortName)] tilladelse: AFVIST – giv Pladespiller adgang til \(displayName) i "
+                    + "Systemindstillinger ▸ Anonymitet og sikkerhed ▸ Automatisering. Bruger kun notifikationer; "
+                    + "tjekker igen hvert 10. s (uden vindue)")
             }
-            setAccessProblem("Giv Pladespiller adgang til \(displayName) i Systemindstillinger ▸ Anonymitet og sikkerhed ▸ Automatisering")
+            setAccessProblem(Self.deniedMessage(displayName))
             startAccessTimer()
             return false
         case .notDetermined:
-            setAccessProblem("Tillad Pladespiller at styre \(displayName) i vinduet fra macOS")
+            setAccessProblem(Self.askingMessage(displayName))
             startAccessTimer()
             return false
         case .notRunning:
@@ -254,8 +258,7 @@ class PlayerAppSource: NowPlayingSource, AccessReporting {
             MainActor.assumeIsolated {
                 guard let self, let pid = self.runningPID else { return }
                 Task {
-                    let check = await AppleEventQueue.shared.run(pid: pid) { t in t.permission(ask: false) }
-                    if case .success(let s) = check.result, s == .granted {
+                    if await AppleEventQueue.permission(pid: pid, ask: false) == .granted {
                         self.handleAccess(.granted)
                         self.requestFetch(reason: "adgang givet")
                     }
@@ -265,6 +268,10 @@ class PlayerAppSource: NowPlayingSource, AccessReporting {
         RunLoop.main.add(t, forMode: .common)
         accessTimer = t
     }
+
+    /// Korte tekster til widgetten (højst 2 korte linjer i Lille); den lange forklaring står i loggen (QA N7).
+    static func askingMessage(_ app: String) -> String { "Tillad adgang til \(app)" }
+    static func deniedMessage(_ app: String) -> String { "Ingen adgang til \(app) · Åbn Indstillinger" }
 
     private func setAccessProblem(_ message: String?) {
         let p = message.map { SourceAccessProblem(bundleID: bundleID, message: $0) }
@@ -296,7 +303,7 @@ class PlayerAppSource: NowPlayingSource, AccessReporting {
     private func runStatus() async -> Timed<ScriptValue>? {
         if Self.useAppleScript { return await AppleScriptRunner.shared.run(statusScript) }
         guard let pid = runningPID else { return nil }
-        return await AppleEventQueue.shared.run(pid: pid, statusFetch)
+        return await events.run(pid: pid, statusFetch)
     }
 
     private func handle(_ outcome: Timed<ScriptValue>, reason: String, staleIfChangedSince generation: Int) {
@@ -364,7 +371,7 @@ class PlayerAppSource: NowPlayingSource, AccessReporting {
             if Self.useAppleScript {
                 outcome = await AppleScriptRunner.shared.run(script)
             } else {
-                outcome = await AppleEventQueue.shared.run(pid: pid) { t throws(ScriptError) in try t.send(cls, id) }
+                outcome = await self.events.run(pid: pid) { t throws(ScriptError) in try t.send(cls, id) }
             }
             switch outcome.result {
             case .success: NowPlayingLog.log("[\(self.shortName)] sendt \(command.rawValue) (\(outcome.milliseconds) ms)")

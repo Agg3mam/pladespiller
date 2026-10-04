@@ -13,7 +13,9 @@ import Foundation
 nonisolated struct AETarget: @unchecked Sendable {   // oprettes og bruges kun på køen
     let pid: pid_t
     let address: NSAppleEventDescriptor
-    var timeout: TimeInterval = 3
+    /// Sekunder pr. event. Status/kommandoer: 2 s (og en timeout afbryder resten af statuskaldet,
+    /// så en hængende app højst holder køen ~2 s). Cover: 5 s.
+    var timeout: TimeInterval = 2
 
     init(pid: pid_t) {
         self.pid = pid
@@ -151,11 +153,26 @@ nonisolated enum AE {
     }
 }
 
-/// Én seriel kø til alle Apple Events og AppleScripts (NSAppleScript er ikke trådsikker,
-/// og så kan to kilder ikke sende samtidig).
+/// En seriel kø til Apple Events for ÉN kildeapp. Hver kilde har sin egen, så en Spotify der hænger
+/// (op til `AETarget.timeout` pr. event) ikke blokerer Musik og omvendt.
+/// Tilladelsesdialogen (ask: true) kører IKKE her, men på `permission(pid:ask:)`, så status og
+/// kommandoer ikke venter på at brugeren svarer.
 nonisolated final class AppleEventQueue: Sendable {
-    static let shared = AppleEventQueue()
-    let queue = DispatchQueue(label: "dk.holgerskov.Pladespiller.appleevents", qos: .userInitiated)
+    let queue: DispatchQueue
+
+    init(label: String) {
+        queue = DispatchQueue(label: "dk.holgerskov.Pladespiller.appleevents.\(label)", qos: .userInitiated)
+    }
+
+    /// Spørger TCC om tilladelse til at styre processen. Kører på en global kø (trådsikkert API),
+    /// uden for kildernes event-køer. `ask: true` kan vente længe på brugeren.
+    static func permission(pid: pid_t, ask: Bool) async -> AccessState {
+        await withCheckedContinuation { (cont: CheckedContinuation<AccessState, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                cont.resume(returning: AETarget(pid: pid).permission(ask: ask))
+            }
+        }
+    }
 
     /// Kører `work` mod processen `pid` på køen og leverer resultatet tilbage (med tidspunkter).
     func run<T: Sendable>(pid: pid_t, _ work: @escaping @Sendable (AETarget) throws(ScriptError) -> T) async -> Timed<T> {
