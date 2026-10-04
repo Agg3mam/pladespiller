@@ -49,7 +49,7 @@ final class Settings {
         static let positionLocked = "pladespiller.positionLocked"
         /// Skærmen widgetten sidst stod på (stabilt skærm-id).
         static let lastScreenID = "pladespiller.lastScreenID"
-        /// Placering pr. skærm: `placement.<skærm-id>` → `"x,y"` (vinduets nederste venstre hjørne, skærmkoordinater).
+        /// Placering pr. skærm: `placement.<skærm-id>` → `"x,y"` (vinduets øverste venstre hjørne, AppKit-skærmkoordinater).
         static func placement(screenID: String) -> String { "pladespiller.placement.\(screenID)" }
     }
 
