@@ -5,12 +5,14 @@ import SwiftUI
 /// skallen (lys/mørk, alle størrelser) til PNG i `mappe`, så den kan sammenlignes med Apples
 /// widget-billeder. Returnerer antal fejl.
 enum WindowSelfTest {
+    private final class Tally { var failures = 0 }
+
     @discardableResult
     static func run(outputDirectory: URL? = nil) -> Int {
-        var failures = 0
+        let tally = Tally()
         func check(_ name: String, _ ok: Bool, _ detail: @autoclosure () -> String = "") {
             print(ok ? "OK   " : "FEJL ", name, ok ? "" : detail())
-            if !ok { failures += 1 }
+            if !ok { tally.failures += 1 }
         }
 
         // Brugerens hovedskærm: 1710×1112, menulinje 38 → visibleFrame (0,0,1710,1074) i AppKit.
@@ -81,6 +83,20 @@ enum WindowSelfTest {
         check("TintedAutomatic", WidgetStyle.parse(iconTheme: "TintedAutomatic") == (.glass, nil))
         check("ingen nøgle", WidgetStyle.parse(iconTheme: nil) == (.opaque, nil))
 
+        // 8b. Størrelsesskift fra samme øverste venstre hjørne (QA N15): ingen "drift".
+        do {
+            let topLeft = CGPoint(x: 133, y: visible.maxY)   // CG (133, 38)
+            func place(_ s: WidgetSize) -> CGRect {
+                let size = WidgetMetrics.windowSize(for: s)
+                let r = CGRect(x: topLeft.x, y: topLeft.y - size.height, width: size.width, height: size.height)
+                return GridSnapper.snap(GridSnapper.clamp(r, into: visible), visibleFrame: visible, anchors: apple, pitch: p)
+            }
+            let small1 = place(.small), medium = place(.medium), small2 = place(.small)
+            check("Lille på ønsket plads", small1 == cg(133, 38, 180, 180), "\(small1)")
+            check("Mellem viger for Apple (overlap ved x=313)", !apple.contains { $0.intersects(medium.insetBy(dx: 1, dy: 1)) }, "\(medium)")
+            check("Lille tilbage på samme plads", small2 == small1, "\(small2)")
+        }
+
         // 9. Falmet look.
         typealias D = WidgetDimming
         check("Fuld farve-stil → aldrig dæmpet", D.target(mode: .automatic, policy: .fullColor, desktopFocused: false) == 0)
@@ -89,6 +105,10 @@ enum WindowSelfTest {
         check("Altid dæmpet", D.target(mode: .alwaysDimmed, policy: .fullColor, desktopFocused: true) == 1)
         check("Altid fuld farve", D.target(mode: .alwaysFull, policy: .automatic, desktopFocused: false) == 0)
         check("widgetAppearance 1 = Fuld farve", D.systemPolicy(widgetAppearance: 1) == .fullColor)
+        check("Cmd+Tab til Finder med vinduer → dæmpet", D.desktopFocusOnFinderActivation(clickedDesktop: nil, finderHasWindows: true) == false)
+        check("Klik på skrivebordet → fuld farve", D.desktopFocusOnFinderActivation(clickedDesktop: true, finderHasWindows: true))
+        check("Klik i Finder-vindue → dæmpet", D.desktopFocusOnFinderActivation(clickedDesktop: false, finderHasWindows: true) == false)
+        check("Finder uden vinduer → fuld farve", D.desktopFocusOnFinderActivation(clickedDesktop: nil, finderHasWindows: false))
         check("widgetAppearance ukendt = Automatisk", D.systemPolicy(widgetAppearance: nil) == .automatic)
 
         // 10. Menu.
@@ -122,7 +142,12 @@ enum WindowSelfTest {
         print("     Apple-widgets nu:", AppleWidgetWindows.frames())
 
         if let dir = outputDirectory { renderChrome(to: dir) }
-        print(failures == 0 ? "Vindue-selvtest: alt OK" : "Vindue-selvtest: \(failures) fejl")
+        let failures = tally.failures
+        if failures == 0 {
+            print("Vindue-selvtest: alt OK")
+        } else {
+            print("Vindue-selvtest: \(failures) fejl")
+        }
         return failures
     }
 

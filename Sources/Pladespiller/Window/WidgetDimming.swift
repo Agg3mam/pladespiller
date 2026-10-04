@@ -20,10 +20,10 @@ enum WidgetDimLook {
 ///   andet program er aktivt) → aldrig dæmpet. Ellers: fuld farve når Finder er aktiv og skrivebordet
 ///   har fokus, dæmpet i alle andre tilfælde.
 ///
-/// Skrivebordsfokus: Finder aktiveret uden at musen står over et Finder-vindue (klik på skrivebordet),
-/// eller Finder har ingen vinduer. Mens Finder er aktiv, lytter en global musemonitor efter klik
-/// (kræver ikke tilgængeligheds-tilladelse for museklik) og afgør ud fra CGWindowList om klikket
-/// ramte et Finder-vindue eller skrivebordet. Monitoren findes kun mens Finder er forrest.
+/// Skrivebordsfokus: Finder blev aktiveret af et klik (< 0,75 s før) der ikke ramte noget almindeligt
+/// vindue, eller Finder har ingen vinduer. Cmd+Tab/Dock til Finder med vinduer = Finder-vindue i fokus
+/// (QA N5). En global musemonitor (kræver ikke tilgængeligheds-tilladelse for museklik) gemmer blot
+/// tid og sted for hvert klik; mens Finder er forrest, afgør den også om et klik ramte skrivebordet.
 final class WidgetDimming {
     /// Systemets widgetstil, så vidt den kendes.
     nonisolated enum SystemPolicy: Equatable { case automatic, fullColor }
@@ -66,6 +66,7 @@ final class WidgetDimming {
             let bundleID = app?.bundleIdentifier
             MainActor.assumeIsolated { self?.applicationActivated(bundleID: bundleID) }
         }
+        installClickMonitor()
         applicationActivated(bundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
         observeInputs()
     }
@@ -82,36 +83,61 @@ final class WidgetDimming {
         }
     }
 
+    /// Seneste globale klik (tid + sted). Bruges til at skelne "Finder aktiveret ved klik på
+    /// skrivebordet" fra Cmd+Tab/Dock (QA N5). Monitoren gemmer kun to værdier pr. klik.
+    private var lastClick: (time: TimeInterval, location: CGPoint)?
+
     private func applicationActivated(bundleID: String?) {
-        let finder = bundleID == Self.finderBundleID
-        if finder {
-            desktopFocused = !Self.finderWindow(at: NSEvent.mouseLocation) || !Self.finderHasWindows()
-            installClickMonitor()
-        } else {
+        guard bundleID == Self.finderBundleID else {
             desktopFocused = false
-            removeClickMonitor()
+            update()
+            return
         }
-        update()
+        // Klikket der aktiverede Finder kan nå monitoren lidt efter aktiveringen: vent ét øjeblik
+        // (engangsforsinkelse, ingen polling), så vi ikke blinker dæmpet → fuld farve.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self,
+                      NSWorkspace.shared.frontmostApplication?.bundleIdentifier == Self.finderBundleID else { return }
+                let now = ProcessInfo.processInfo.systemUptime
+                let recent = self.lastClick.flatMap { now - $0.time < 0.75 ? $0.location : nil }
+                self.desktopFocused = Self.desktopFocusOnFinderActivation(
+                    clickedDesktop: recent.map { !Self.normalWindowExists(at: $0) },
+                    finderHasWindows: Self.finderHasWindows())
+                self.update()
+            }
+        }
+    }
+
+    /// Ren funktion. `clickedDesktop`: nil = ingen frisk klik (Cmd+Tab, tastatur), true = klik ramte
+    /// intet almindeligt vindue (skrivebordet), false = klik på et vindue/Dock.
+    nonisolated static func desktopFocusOnFinderActivation(clickedDesktop: Bool?, finderHasWindows: Bool) -> Bool {
+        if clickedDesktop == true { return true }
+        // Cmd+Tab, Dock eller klik i et Finder-vindue: et Finder-vindue får fokus, hvis der er et.
+        return !finderHasWindows
     }
 
     private func installClickMonitor() {
         guard clickMonitor == nil else { return }
         clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            // Lad Finder/WindowServer nå at ordne vinduerne efter klikket.
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated {
-                    guard let self, NSWorkspace.shared.frontmostApplication?.bundleIdentifier == Self.finderBundleID
-                    else { return }
-                    self.desktopFocused = !Self.finderWindow(at: NSEvent.mouseLocation)
-                    self.update()
+            let location = NSEvent.mouseLocation
+            let time = ProcessInfo.processInfo.systemUptime
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.lastClick = (time, location)
+                // Klik mens Finder allerede er forrest: skrivebord eller Finder-vindue?
+                guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == Self.finderBundleID else { return }
+                // Lad WindowServer nå at ordne vinduerne efter klikket.
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        guard NSWorkspace.shared.frontmostApplication?.bundleIdentifier == Self.finderBundleID
+                        else { return }
+                        self.desktopFocused = !Self.normalWindowExists(at: location)
+                        self.update()
+                    }
                 }
             }
         }
-    }
-
-    private func removeClickMonitor() {
-        if let m = clickMonitor { NSEvent.removeMonitor(m) }
-        clickMonitor = nil
     }
 
     private func update() {
@@ -140,8 +166,23 @@ final class WidgetDimming {
 
     private static func finderHasWindows() -> Bool { !finderWindowFrames().isEmpty }
 
-    /// Står punktet (AppKit-koordinater) over et almindeligt Finder-vindue?
-    private static func finderWindow(at point: CGPoint) -> Bool {
-        finderWindowFrames().contains { $0.contains(point) }
+    /// Står punktet (AppKit-koordinater) over et almindeligt vindue, Dock eller lignende (lag 0…20)?
+    /// Ellers er det skrivebordet. Notifikationscentrets gennemsigtige fuldskærmsvindue og vores
+    /// egne vinduer tæller ikke.
+    private static func normalWindowExists(at point: CGPoint) -> Bool {
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
+                                                    kCGNullWindowID) as? [[String: Any]] else { return false }
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        let ncPIDs = Set(NSRunningApplication.runningApplications(withBundleIdentifier: AppleWidgetWindows.ownerBundleID)
+            .map(\.processIdentifier))
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
+        return list.contains { info in
+            guard let layer = info[kCGWindowLayer as String] as? Int, (0...20).contains(layer),
+                  let pid = info[kCGWindowOwnerPID as String] as? pid_t, pid != ownPID, !ncPIDs.contains(pid),
+                  (info[kCGWindowAlpha as String] as? Double ?? 1) > 0,
+                  let dict = info[kCGWindowBounds as String] as? NSDictionary,
+                  let r = CGRect(dictionaryRepresentation: dict) else { return false }
+            return GridSnapper.appKitRect(fromCG: r, primaryScreenHeight: primaryHeight).contains(point)
+        }
     }
 }

@@ -52,7 +52,10 @@ final class WidgetMenu {
         menu.addItem(login)
         menu.addItem(.separator())
 
-        menu.addItem(item("Fjern widget", checked: false) { NSApp.terminate(nil) })
+        menu.addItem(item("Fjern widget", checked: false) {
+            // Efter menuens sporingsløkke, ikke inde i den.
+            DispatchQueue.main.async { MainActor.assumeIsolated { RemoveWidget.confirmAndRemove() } }
+        })
         return menu
     }
 
@@ -83,6 +86,15 @@ enum LoginItem {
     static var isEnabled: Bool { SMAppService.mainApp.status == .enabled }
     static var needsApproval: Bool { SMAppService.mainApp.status == .requiresApproval }
 
+    /// Afregistrér, hvis registreret (også når den afventer godkendelse).
+    static func disable() {
+        let service = SMAppService.mainApp
+        guard service.status == .enabled || service.status == .requiresApproval else { return }
+        do { try service.unregister() } catch {
+            NSLog("Pladespiller: kunne ikke fjerne fra login: \(error.localizedDescription)")
+        }
+    }
+
     static func toggle() {
         let service = SMAppService.mainApp
         if service.status == .requiresApproval {
@@ -103,5 +115,28 @@ enum LoginItem {
         if service.status == .requiresApproval {
             SMAppService.openSystemSettingsLoginItems()
         }
+    }
+}
+
+/// "Fjern widget" som hos Apple: væk for altid, dvs. også fra login (QA N4).
+enum RemoveWidget {
+    static func confirmAndRemove() {
+        // En accessory-app skal aktiveres, for at dialogen kan få fokus. Vi husker hvem der havde
+        // fokus og giver det tilbage, hvis brugeren fortryder.
+        let previous = NSWorkspace.shared.frontmostApplication
+        NSApp.activate()
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Fjern Pladespiller fra skrivebordet?"
+        alert.informativeText = "Den åbner ikke længere ved login."
+        alert.addButton(withTitle: "Fjern")
+        alert.addButton(withTitle: "Annuller").keyEquivalent = "\u{1b}"
+        alert.window.level = .modalPanel
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            if let previous, previous != NSRunningApplication.current { previous.activate() }
+            return
+        }
+        LoginItem.disable()
+        NSApp.terminate(nil)
     }
 }
