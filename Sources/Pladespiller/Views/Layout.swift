@@ -154,7 +154,9 @@ struct ProgressLine: View {
                 let f = np.progress(at: np.positionTimestamp)
                 ZStack(alignment: .leading) {
                     Capsule().fill(trackColor)
-                    Capsule().fill(fillColor).frame(width: max(Layout.progressHeight, geo.size.width * f))
+                    if np.duration > 0 {
+                        Capsule().fill(fillColor).frame(width: max(Layout.progressHeight, geo.size.width * f))
+                    }
                 }
             }
             .frame(height: Layout.progressHeight)
@@ -232,7 +234,7 @@ final class ProgressNSView: NSView {
         fillLayer.backgroundColor = fill.cgColor
         fillLayer.removeAllAnimations()
         let f = duration > 0 ? min(max(startPosition / duration, 0), 1) : 0
-        let w0 = max(h, w * f)
+        let w0 = duration > 0 ? max(h, w * f) : 0     // radio uden varighed: kun sporet, ingen fyld
         fillLayer.bounds = CGRect(x: 0, y: 0, width: active && duration > 0 ? w : w0, height: h)
         fillLayer.position = .zero
         if active, duration > 0, w0 < w {
@@ -252,11 +254,12 @@ final class ProgressNSView: NSView {
 /// Fremdriftslinje med forløbet tid til venstre og varighed til højre, på én linje.
 struct ProgressRow: View {
     let np: NowPlaying
+    let onSeek: (TimeInterval) -> Void
 
     var body: some View {
         HStack(spacing: 8) {
             TimeLabel(np: np, mode: .elapsed).probe("tid-start")
-            ProgressLine(np: np).probe("fremdrift")
+            SeekBar(np: np, onSeek: onSeek).probe("fremdrift")
             TimeLabel(np: np, mode: .total).probe("tid-slut")
         }
     }
@@ -270,9 +273,13 @@ struct TimeLabel: View {
 
     @Environment(\.turntableSnapshot) private var snapshot
     @Environment(\.windowIsVisible) private var windowVisible
+    @Environment(\.seekPreview) private var preview
 
     var body: some View {
-        if mode == .elapsed, np.isPlaying, snapshot == nil, windowVisible {
+        // Under træk på linjen følger tiden musen.
+        if mode == .elapsed, let f = preview?.fraction ?? ScrubState.shared.fraction(for: np) {
+            label(f * np.duration)
+        } else if mode == .elapsed, np.isPlaying, snapshot == nil, windowVisible {
             TimelineView(.periodic(from: .now, by: 1)) { ctx in label(np.position(at: ctx.date)) }
         } else {
             label(mode == .total ? np.duration : np.position(at: snapshot == nil ? .now : np.positionTimestamp))

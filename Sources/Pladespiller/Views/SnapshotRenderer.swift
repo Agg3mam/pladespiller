@@ -22,6 +22,7 @@ enum SnapshotRenderer {
         /// Baggrund: neutral flade (som widgettens uigennemsigtige flade) eller "skrivebord" med dæmpet, gennemsigtig flade.
         var desktop = false
         var speed: SpinSpeed = .calm
+        var seekPreview: SeekPreview? = nil
         /// Kun layout-tjek: tegn kun dette element på gennemsigtig baggrund.
         var probe: String? = nil
         var caption: String = ""
@@ -44,7 +45,7 @@ enum SnapshotRenderer {
         WoodTexture.loadSynchronously()
         let env = ProcessInfo.processInfo.environment
         if env["PLADESPILLER_SNAPSHOT_LAYOUT"] == "1" {        // hurtig gentagelse af layoutarbejdet
-            layoutCheck(dir); largeFinal(dir); beforeAfter(dir); return
+            layoutCheck(dir); largeFinal(dir); beforeAfter(dir); seekSheet(dir); scrubReport(dir); return
         }
         let live = LiveSequenceTest.run(dir: dir)
         try? live.joined(separator: "\n").write(to: dir.appendingPathComponent("live-tjek.txt"), atomically: true, encoding: .utf8)
@@ -53,7 +54,7 @@ enum SnapshotRenderer {
         woodCloseUp(dir)
         if ProcessInfo.processInfo.environment["PLADESPILLER_SNAPSHOT_ONLY_WOOD"] == "1" { return }
         if ProcessInfo.processInfo.environment["PLADESPILLER_SNAPSHOT_LAYOUT"] == "1" {
-            layoutCheck(dir); largeFinal(dir); beforeAfter(dir); return
+            layoutCheck(dir); largeFinal(dir); beforeAfter(dir); seekSheet(dir); scrubReport(dir); return
         }
         let music = NowPlaying.BundleID.music
 
@@ -66,6 +67,8 @@ enum SnapshotRenderer {
         layoutCheck(dir)
         largeFinal(dir)
         beforeAfter(dir)
+        seekSheet(dir)
+        scrubReport(dir)
 
         // 1. Afspil: flere vinkler og fremdrifter
         let playing = [0.0, 0.25, 0.5, 0.75].map { dt in
@@ -228,6 +231,7 @@ enum SnapshotRenderer {
             .environment(\.marqueePhase, s.marqueePhase)
             .environment(\.snapshotAccessProblem, s.problem)
             .environment(\.layoutProbe, s.probe)
+            .environment(\.seekPreview, s.seekPreview)
             .environment(\.colorScheme, scheme)
             .environment(\.displayScale, 2)
     }
@@ -523,9 +527,90 @@ extension SnapshotRenderer {
             }
             lines.append("")
         }
+        // Spoling: hover/thumb og træk må ikke flytte noget.
+        lines.append("Spoling: samme placering med og uden hover/træk (thumb vist):")
+        for size in [WidgetSize.medium, .large] {
+            let base = Scene(name: "probe", events: [(0, track)], time: 4, size: size)
+            for name in ["titel", "afspil", "forrige", "fremdrift#ramme", "tid-start#ramme", "kunstner"] {
+                if size == .medium && name == "tid-start#ramme" { continue }
+                var a = base; a.probe = name
+                var b = base; b.probe = name; b.seekPreview = SeekPreview(hover: true, fraction: 0.7)
+                guard let ra = inkRect(a), let rb = inkRect(b) else { continue }
+                let d = max(abs(ra.minX - rb.minX), abs(ra.minY - rb.minY), abs(ra.maxX - rb.maxX), abs(ra.maxY - rb.maxY))
+                let ok = d <= 0.5
+                if !ok { failures += 1 }
+                lines.append(String(format: "  %@ %@ · %@: største forskydning %.2f pt", ok ? "OK" : "FEJL", size.title, name, d))
+            }
+        }
+        lines.append("")
         lines.insert(failures == 0 ? "ALT FLUGTER (inden for 0,5 pt)" : "\(failures) AFVIGELSER", at: 0)
         try? lines.joined(separator: "\n").write(to: dir.appendingPathComponent("layout-tjek.txt"), atomically: true, encoding: .utf8)
         print(lines.joined(separator: "\n"))
+    }
+
+    // MARK: Spoling
+
+    static func seekSheet(_ dir: URL) {
+        let music = NowPlaying.BundleID.music
+        var radio = np(0, progress: 0, at: 0, app: music)
+        radio.duration = 0
+        radio.position = 95
+        radio.title = "Radio P6 Beat"
+        radio.artist = "Direkte"
+        let a = np(0, progress: 0.35, at: 0, app: music), b = np(1, progress: 0.35, at: 0, app: music)
+        let scenes: [Scene] = [
+            Scene(name: "spol-mellem", events: [(0, a)], time: 4, caption: "Mellem · normal"),
+            Scene(name: "spol-mellem-hover", events: [(0, a)], time: 4, seekPreview: SeekPreview(hover: true), caption: "Mellem · mus over linjen"),
+            Scene(name: "spol-mellem-traek", events: [(0, a)], time: 4, seekPreview: SeekPreview(hover: true, fraction: 0.72),
+                  caption: "Mellem · træk til 72 %"),
+            Scene(name: "spol-mellem-lys", events: [(0, b)], time: 4, dark: false, seekPreview: SeekPreview(hover: true),
+                  caption: "Mellem · mus over, lys"),
+            Scene(name: "spol-stor", events: [(0, a)], time: 4, size: .large, seekPreview: SeekPreview(hover: true),
+                  caption: "Stor · mus over linjen"),
+            Scene(name: "spol-stor-traek", events: [(0, b)], time: 4, size: .large, dark: false,
+                  seekPreview: SeekPreview(hover: true, fraction: 0.2), caption: "Stor · træk til 20 % (tiden følger), lys"),
+            Scene(name: "spol-radio", events: [(0, radio)], time: 4, size: .large, seekPreview: SeekPreview(hover: true),
+                  caption: "Radio uden varighed: ingen knap"),
+        ]
+        sheet("10-spoling", scenes, dir: dir, columns: 2, scale: 3)
+    }
+
+    /// Armen under scrub (mange små spring): ingen løft og blød vinkel. Et enkelt stort klik løfter kort.
+    static func scrubReport(_ dir: URL) {
+        let g = TurntableGeometry(size: CGSize(width: 148, height: 148), cornerRadius: 20)
+        var a = TurntableAnimator(geometry: g)
+        let d = 238.0
+        a.update(TurntableInput(np(0, progress: 0.2, at: 0), at: base), at: 0)
+        var lines = ["# Scrub: træk fra 20 % til 80 % over 1,2 s (opdatering hver 50 ms), derefter et klik til 30 %",
+                     "# t (s)\tarm (grader)\tløft"]
+        var maxLiftScrub = 0.0, maxStep = 0.0, maxLiftClick = 0.0
+        var prevAngle: Double?
+        var t = 1.0
+        a.scrubbing = true
+        while t <= 2.2 + 1e-9 {
+            let f = 0.2 + 0.6 * (t - 1.0) / 1.2
+            a.update(TurntableInput(np(0, progress: f, at: t), at: base.addingTimeInterval(t)), at: t)
+            for k in 0..<5 {
+                let tt = t + Double(k) * 0.01
+                let p = a.pose(at: tt)
+                maxLiftScrub = max(maxLiftScrub, p.armLift)
+                if let pa = prevAngle { maxStep = max(maxStep, abs(p.armAngle - pa) * 180 / .pi) }
+                prevAngle = p.armAngle
+                lines.append(String(format: "%.2f\t%7.3f\t%.3f", tt, p.armAngle * 180 / .pi, p.armLift))
+            }
+            t += 0.05
+        }
+        a.scrubbing = false
+        let tc = 4.0
+        a.update(TurntableInput(np(0, progress: 0.3, at: tc), at: base.addingTimeInterval(tc)), at: tc)
+        var tt = tc
+        while tt <= tc + 1 { maxLiftClick = max(maxLiftClick, a.pose(at: tt).armLift); tt += 0.02 }
+        _ = d
+        let summary = String(format: "Scrub: største løft %.3f (skal være 0), største vinkelskridt pr. 10 ms %.3f°. Stort klik: løft %.2f (løftes kort).",
+                             maxLiftScrub, maxStep, maxLiftClick)
+        lines.insert("# " + summary, at: 0)
+        try? lines.joined(separator: "\n").write(to: dir.appendingPathComponent("scrub-arm.txt"), atomically: true, encoding: .utf8)
+        print(summary)
     }
 
     // MARK: Stor "Helt træ" – endelig

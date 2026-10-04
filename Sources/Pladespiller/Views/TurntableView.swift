@@ -28,6 +28,7 @@ struct TurntableView: View {
     let nowPlaying: NowPlaying?
     var dim: Double = 0
     var speed: SpinSpeed = .calm
+    var scrubbing = false
     var onArmClick: () -> Void = {}
     var onRecordClick: () -> Void = {}
     var onSpeedClick: (SpinSpeed) -> Void = { _ in }
@@ -46,7 +47,7 @@ struct TurntableView: View {
                         .resizable()
                 }
             } else {
-                LiveTurntable(geometry: geometry, style: style, nowPlaying: nowPlaying, dim: dim, speed: speed,
+                LiveTurntable(geometry: geometry, style: style, nowPlaying: nowPlaying, dim: dim, speed: speed, scrubbing: scrubbing,
                               onArmClick: onArmClick, onRecordClick: onRecordClick, onSpeedClick: onSpeedClick)
             }
         }
@@ -69,6 +70,7 @@ private struct LiveTurntable: NSViewRepresentable {
     let nowPlaying: NowPlaying?
     let dim: Double
     let speed: SpinSpeed
+    let scrubbing: Bool
     let onArmClick: () -> Void
     let onRecordClick: () -> Void
     let onSpeedClick: (SpinSpeed) -> Void
@@ -81,6 +83,7 @@ private struct LiveTurntable: NSViewRepresentable {
         view.onSpeedClick = onSpeedClick
         view.configure(geometry: geometry, style: style)
         view.setSpeed(speed)
+        view.setScrubbing(scrubbing)
         view.update(nowPlaying)
         view.setDim(dim)
     }
@@ -228,6 +231,13 @@ final class TurntableNSView: NSView {
         if animator == nil { animator = TurntableAnimator(geometry: geometry) }
         let t = CACurrentMediaTime()
         if animator!.setSpeed(speed, at: t) { resync(at: t) }
+    }
+
+    /// Brugeren trækker på fremdriftslinjen: armen glider efter uden at løftes.
+    func setScrubbing(_ on: Bool) {
+        guard let geometry else { return }
+        if animator == nil { animator = TurntableAnimator(geometry: geometry) }
+        animator!.scrubbing = on
     }
 
     func update(_ np: NowPlaying?) {
