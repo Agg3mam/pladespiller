@@ -141,13 +141,12 @@ struct GlyphView: View {
 /// så appen laver intet pr. billede). I snapshots tegnes den statisk i SwiftUI.
 struct ProgressLine: View {
     let np: NowPlaying
-    var light = false        // hvid linje (på mørk infobjælke)
 
     @Environment(\.turntableSnapshot) private var snapshot
     @Environment(\.colorScheme) private var scheme
     @Environment(\.windowIsVisible) private var windowVisible
 
-    private var dark: Bool { light || scheme == .dark }
+    private var dark: Bool { scheme == .dark }
 
     var body: some View {
         if snapshot != nil {
@@ -253,13 +252,12 @@ final class ProgressNSView: NSView {
 /// Fremdriftslinje med forløbet tid til venstre og varighed til højre, på én linje.
 struct ProgressRow: View {
     let np: NowPlaying
-    var light = false
 
     var body: some View {
         HStack(spacing: 8) {
-            TimeLabel(np: np, mode: .elapsed, light: light).probe("tid-start")
-            ProgressLine(np: np, light: light).probe("fremdrift")
-            TimeLabel(np: np, mode: .total, light: light).probe("tid-slut")
+            TimeLabel(np: np, mode: .elapsed).probe("tid-start")
+            ProgressLine(np: np).probe("fremdrift")
+            TimeLabel(np: np, mode: .total).probe("tid-slut")
         }
     }
 }
@@ -269,7 +267,6 @@ struct TimeLabel: View {
     enum Mode { case elapsed, total }
     let np: NowPlaying
     let mode: Mode
-    var light = false
 
     @Environment(\.turntableSnapshot) private var snapshot
     @Environment(\.windowIsVisible) private var windowVisible
@@ -285,7 +282,7 @@ struct TimeLabel: View {
     private func label(_ seconds: Double) -> some View {
         Text(mode == .total && np.duration <= 0 ? "–:––" : formatTime(seconds))
             .font(Font(Layout.timeFont() as CTFont))
-            .foregroundStyle(light ? AnyShapeStyle(Color.white.opacity(0.7)) : AnyShapeStyle(.secondary))
+            .foregroundStyle(.secondary)
             .lineLimit(1)
             .fixedSize()
     }

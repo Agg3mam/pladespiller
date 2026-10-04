@@ -12,7 +12,6 @@ struct WidgetView: View {
     @Environment(Settings.self) private var settings
     @Environment(NowPlayingStore.self) private var store
     @Environment(\.widgetPresentation) private var presentation
-    @Environment(\.largeLayout) private var largeLayout
 
     var body: some View {
         let body = WidgetMetrics.bodySize(for: settings.size)
@@ -20,13 +19,7 @@ struct WidgetView: View {
             switch settings.size {
             case .small: small(body)
             case .medium: medium(body)
-            case .large:
-                switch largeLayout {
-                case .classic: largeClassic(body)
-                case .wood: largeWood(body)
-                case .centered: largeCentered(body)
-                case .cropped: largeCropped(body)
-                }
+            case .large: large(body)
             }
         }
         .frame(width: body.width, height: body.height)
@@ -125,152 +118,79 @@ struct WidgetView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    // MARK: Stor (standard indtil brugeren har valgt): krop øverst, tekst, fremdrift og knapper under
+    // MARK: Stor ("Helt træ", brugerens valg): kroppen fylder hele widgetten; infobjælke nederst
 
-    static let largeClassicDeckHeight: CGFloat = 208
-
-    private func largeClassic(_ body: CGSize) -> some View {
-        let w = body.width - Layout.objectInset * 2
-        let h = Self.largeClassicDeckHeight
-        let textWidth = body.width - Layout.padding * 2
-        return VStack(alignment: .leading, spacing: 0) {
-            turntable(CGSize(width: w, height: h))
-                .padding(Layout.objectInset)
-            dimmed(
-                VStack(alignment: .leading, spacing: 0) {
-                    TrackText(np: np, problem: problem, width: textWidth, showAlbum: true, albumInline: true, actions: actions)
-                        .padding(.top, titleTop(Layout.gap) - Layout.objectInset)   // versalhøjde = krop bund + 12
-                    Spacer(minLength: 0)
-                    if let np {
-                        ProgressRow(np: np).padding(.bottom, Layout.progressToButtons)
-                        TransportRow(isPlaying: np.isPlaying, spread: false, actions: actions)
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-                .padding(.horizontal, Layout.padding)
-                .padding(.bottom, Layout.padding)
-            )
-        }
+    /// Infobjælken: 8 pt fra kanten, radius 20 (koncentrisk), 16 pt indvendig padding.
+    static let panelInset = Layout.objectInset
+    static let panelPadding = Layout.padding
+    static var panelHeight: CGFloat {
+        // padding + titel (versal→bund) + kunstner + luft + fremdrift + knapper + padding
+        (panelPadding + 18 - Layout.capInset(Layout.titleFont()) + Layout.lineGap + 16 + 12 + 13 + Layout.progressToButtons
+            + Layout.playDiameter + panelPadding).rounded()      // hele punkter: ingen halve pixels
+    }
+    static func panelRect(_ body: CGSize) -> CGRect {
+        CGRect(x: panelInset, y: body.height - panelInset - panelHeight, width: body.width - panelInset * 2, height: panelHeight)
     }
 
-    // MARK: Forslag A "Helt træ": kroppen fylder hele widgetten; mørk infobjælke nederst
-
-    private func largeWood(_ body: CGSize) -> some View {
-        let panelHeight: CGFloat = 116
-        let deckSide = body.height - panelHeight - Layout.objectInset * 3
-        let deck = CGRect(x: (body.width - deckSide) / 2 - 6, y: Layout.objectInset, width: deckSide, height: deckSide)
-        return ZStack(alignment: .bottom) {
-            turntable(body, radius: WidgetMetrics.cornerRadius, deck: deck)
-            dimmed(
-                VStack(alignment: .leading, spacing: 0) {
-                    TrackText(np: np, problem: problem, width: body.width - Layout.padding * 2, showAlbum: true, albumInline: true,
-                              actions: actions)
-                        .padding(.top, titleTop(Layout.padding) - Layout.objectInset)
-                    Spacer(minLength: 0)
-                    if let np {
-                        ProgressRow(np: np, light: true).padding(.bottom, Layout.progressToButtons)
-                        TransportRow(isPlaying: np.isPlaying, spread: false, actions: actions).frame(maxWidth: .infinity)
-                    }
-                }
-                .padding(.horizontal, Layout.padding - Layout.objectInset)
-                .padding(.bottom, Layout.padding - Layout.objectInset)
-                .frame(width: body.width - Layout.objectInset * 2, height: panelHeight, alignment: .topLeading)
-                .background {
-                    RoundedRectangle(cornerRadius: Layout.objectRadius, style: .continuous)
-                        .fill(Color.black.opacity(0.52))
-                        .overlay(RoundedRectangle(cornerRadius: Layout.objectRadius, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.10), lineWidth: 0.5))
-                        .probe("panel")
-                }
-                .environment(\.colorScheme, .dark)
-                .padding(Layout.objectInset)
-            )
-        }
+    /// Dækket (plade + arm) centreret i den synlige del af kroppen over bjælken – efter den synlige masse
+    /// (fra pladens venstrekant til armbasens højrekant), ikke efter dækkets kvadrat.
+    static func largeDeck(_ body: CGSize) -> CGRect {
+        let visibleHeight = panelRect(body).minY
+        let side = visibleHeight - Layout.objectInset * 2
+        let probe = TurntableGeometry(size: CGSize(width: side, height: side), cornerRadius: 0)
+        let massMinX = probe.center.x - probe.platterRadius
+        let massMaxX = probe.pivot.x + probe.basePlateRadius
+        let x = body.width / 2 - (massMinX + massMaxX) / 2
+        return CGRect(x: x.rounded(), y: Layout.objectInset, width: side, height: side)
     }
 
-    // MARK: Forslag B "Centreret": kvadratisk pladespiller øverst, alt centreret under (som Apples Musik-widget)
-
-    private func largeCentered(_ body: CGSize) -> some View {
-        let side: CGFloat = 196
-        return VStack(spacing: 0) {
-            turntable(CGSize(width: side, height: side), radius: WidgetMetrics.cornerRadius - Layout.padding)
-                .padding(.top, Layout.padding)
-            dimmed(
-                VStack(spacing: 0) {
-                    TrackText(np: np, problem: problem, width: body.width - Layout.padding * 2, showAlbum: false, centered: true,
-                              actions: actions)
-                        .padding(.top, titleTop(Layout.gap))
-                    Spacer(minLength: 0)
-                    if let np {
-                        ProgressRow(np: np).padding(.bottom, Layout.progressToButtons)
-                        TransportRow(isPlaying: np.isPlaying, spread: false, actions: actions)
-                    }
-                }
-                .padding(.horizontal, Layout.padding)
-                .padding(.bottom, Layout.padding)
-            )
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    // MARK: Forslag C "Beskåret": en stor pladespiller fylder venstre side og skæres af widgettens kant; én kolonne til højre
-
-    static let croppedSide: CGFloat = 328
-    static var croppedOrigin: CGPoint { CGPoint(x: -146, y: Layout.objectInset) }
-    static var croppedColumn: (x: CGFloat, width: CGFloat) {
-        let x = croppedOrigin.x + croppedSide + Layout.gap
-        return (x, WidgetMetrics.bodySize(for: .large).width - Layout.padding - x)
-    }
-
-    private func largeCropped(_ body: CGSize) -> some View {
-        let side = Self.croppedSide, o = Self.croppedOrigin
-        let col = Self.croppedColumn
+    private func large(_ body: CGSize) -> some View {
+        let panel = Self.panelRect(body)
+        let inner = panel.width - Self.panelPadding * 2
         return ZStack(alignment: .topLeading) {
-            turntable(CGSize(width: side, height: side))
-                .offset(x: o.x, y: o.y)
+            turntable(body, radius: WidgetMetrics.cornerRadius, deck: Self.largeDeck(body))
             dimmed(
                 VStack(alignment: .leading, spacing: 0) {
-                    TrackText(np: np, problem: problem, width: col.width, showAlbum: true, twoLineTitle: true, actions: actions)
-                    // Coveret som et pladeomslag i kolonnen (pladen ligger på pladespilleren ved siden af).
-                    if let art = np?.artwork {
-                        Image(nsImage: art)
-                            .resizable()
-                            .interpolation(.high)
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: col.width, height: col.width)
-                            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(.primary.opacity(0.08), lineWidth: 0.5))
-                            .shadow(color: .black.opacity(0.25), radius: 4, y: 2)
-                            .padding(.top, Layout.gap)
-                            .probe("cover")
-                    }
-                    Spacer(minLength: 0)
                     if let np {
+                        TrackText(np: np, problem: problem, width: inner, showAlbum: true, albumInline: true, actions: actions)
+                        Spacer(minLength: 0)
                         ProgressRow(np: np).padding(.bottom, Layout.progressToButtons)
-                        TransportRow(isPlaying: np.isPlaying, spread: true, actions: actions)
+                        TransportRow(isPlaying: np.isPlaying, spread: false, actions: actions).frame(maxWidth: .infinity)
+                    } else {
+                        // Intet spiller: rolig, centreret i bjælken
+                        Spacer(minLength: 0)
+                        TrackText(np: nil, problem: problem, width: inner, centered: true, actions: actions)
+                        if problem == nil {
+                            Text("Start musik i Spotify eller Musik")
+                                .font(.system(size: Layout.tertiarySize))
+                                .foregroundStyle(.tertiary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.top, 3)
+                        }
+                        Spacer(minLength: 0)
                     }
                 }
-                .padding(.top, titleTop(Layout.padding))
-                .padding(.bottom, Layout.padding)
-                .frame(width: col.width, height: body.height, alignment: .topLeading)
-                .offset(x: col.x)
+                .padding(.top, np == nil ? Self.panelPadding : titleTop(Self.panelPadding) - 0)
+                .padding([.horizontal, .bottom], Self.panelPadding)
+                .frame(width: panel.width, height: panel.height, alignment: .topLeading)
+                .background { InfoPanelBackground().probe("panel") }
+                .offset(x: panel.minX, y: panel.minY)
             )
         }
         .frame(width: body.width, height: body.height, alignment: .topLeading)
-        .clipped()
     }
 }
 
-/// Midlertidig: forslag til Stor, så brugeren kan vælge. Standard = nuværende (poleret) layout.
-enum LargeLayout: String, CaseIterable {
-    case classic, wood, centered, cropped
-    var title: String {
-        switch self {
-        case .classic: "Nuværende"
-        case .wood: "A · Helt træ"
-        case .centered: "B · Centreret"
-        case .cropped: "C · Plade + cover"
-        }
+/// Infobjælkens flade: røget mørkt glas i mørk tilstand, frostet lyst glas i lys tilstand.
+/// Tæt nok til at teksten er læselig på alle temaer (også lyst aluminium og Auto), uden at blive grumset.
+struct InfoPanelBackground: View {
+    @Environment(\.colorScheme) private var scheme
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Layout.objectRadius, style: .continuous)
+        shape
+            .fill(scheme == .dark ? Color(white: 0.07).opacity(0.80) : Color(white: 0.985).opacity(0.88))
+            .overlay(shape.strokeBorder(scheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.06), lineWidth: 0.5))
+            .shadow(color: .black.opacity(scheme == .dark ? 0.35 : 0.18), radius: 6, y: 2)
     }
 }
 
@@ -293,7 +213,6 @@ struct TrackText: View {
     var showAlbum = false
     var albumInline = false
     var centered = false
-    var twoLineTitle = false
     let actions: TrackActions
     @Environment(\.windowIsVisible) private var windowVisible
 
@@ -328,21 +247,11 @@ struct TrackText: View {
         .frame(width: width, alignment: centered ? .center : .leading)
     }
 
-    @ViewBuilder private func title(_ text: String, active: Bool) -> some View {
-        if twoLineTitle {
-            Text(text)
-                .font(.system(size: Layout.titleSize + 2, weight: .semibold))
-                .padding(.leading, -Layout.leadingBearing(text, font: .systemFont(ofSize: Layout.titleSize + 2, weight: .semibold)))
-                .lineLimit(2)
-                .truncationMode(.tail)
-                .fixedSize(horizontal: false, vertical: true)
-                .probe("titel")
-        } else {
-            MarqueeText(text: text, size: Layout.titleSize, width: width, active: active)
-                .padding(.leading, centered ? 0 : -Layout.leadingBearing(text, font: Layout.titleFont()))
-                .frame(maxWidth: .infinity, alignment: centered ? .center : .leading)
-                .probe("titel")
-        }
+    private func title(_ text: String, active: Bool) -> some View {
+        MarqueeText(text: text, size: Layout.titleSize, width: width, active: active)
+            .padding(.leading, -Layout.leadingBearing(text, font: Layout.titleFont()))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .probe("titel")
     }
 
     private func artistLine(_ np: NowPlaying) -> some View {
@@ -511,18 +420,12 @@ private struct TitleStyleKey: EnvironmentKey { static let defaultValue: TitleSty
 private struct MarqueePhaseKey: EnvironmentKey { static let defaultValue: Double? = nil }
 private struct SnapshotProblemKey: EnvironmentKey { static let defaultValue: SourceAccessProblem? = nil }
 private struct WindowIsVisibleKey: EnvironmentKey { static let defaultValue = true }
-private struct LargeLayoutKey: EnvironmentKey { static let defaultValue: LargeLayout = .classic }
 
 extension EnvironmentValues {
     /// Hvordan lange titler vises. Brugerens valg: rulletekst.
     var titleStyle: TitleStyle {
         get { self[TitleStyleKey.self] }
         set { self[TitleStyleKey.self] = newValue }
-    }
-    /// Midlertidigt: hvilket forslag til Stor der vises (standard = nuværende).
-    var largeLayout: LargeLayout {
-        get { self[LargeLayoutKey.self] }
-        set { self[LargeLayoutKey.self] = newValue }
     }
     /// Widgettens vindue er synligt (ikke dækket af andre vinduer).
     var windowIsVisible: Bool {

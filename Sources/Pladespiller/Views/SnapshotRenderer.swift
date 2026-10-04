@@ -21,7 +21,6 @@ enum SnapshotRenderer {
         var problem: SourceAccessProblem? = nil
         /// Baggrund: neutral flade (som widgettens uigennemsigtige flade) eller "skrivebord" med dæmpet, gennemsigtig flade.
         var desktop = false
-        var large: LargeLayout = .classic
         var speed: SpinSpeed = .calm
         /// Kun layout-tjek: tegn kun dette element på gennemsigtig baggrund.
         var probe: String? = nil
@@ -45,7 +44,7 @@ enum SnapshotRenderer {
         WoodTexture.loadSynchronously()
         let env = ProcessInfo.processInfo.environment
         if env["PLADESPILLER_SNAPSHOT_LAYOUT"] == "1" {        // hurtig gentagelse af layoutarbejdet
-            layoutCheck(dir); largeProposals(dir); beforeAfter(dir); return
+            layoutCheck(dir); largeFinal(dir); beforeAfter(dir); return
         }
         let live = LiveSequenceTest.run(dir: dir)
         try? live.joined(separator: "\n").write(to: dir.appendingPathComponent("live-tjek.txt"), atomically: true, encoding: .utf8)
@@ -54,7 +53,7 @@ enum SnapshotRenderer {
         woodCloseUp(dir)
         if ProcessInfo.processInfo.environment["PLADESPILLER_SNAPSHOT_ONLY_WOOD"] == "1" { return }
         if ProcessInfo.processInfo.environment["PLADESPILLER_SNAPSHOT_LAYOUT"] == "1" {
-            layoutCheck(dir); largeProposals(dir); beforeAfter(dir); return
+            layoutCheck(dir); largeFinal(dir); beforeAfter(dir); return
         }
         let music = NowPlaying.BundleID.music
 
@@ -65,7 +64,7 @@ enum SnapshotRenderer {
         }
 
         layoutCheck(dir)
-        largeProposals(dir)
+        largeFinal(dir)
         beforeAfter(dir)
 
         // 1. Afspil: flere vinkler og fremdrifter
@@ -228,7 +227,6 @@ enum SnapshotRenderer {
             .environment(\.titleStyle, s.titleStyle)
             .environment(\.marqueePhase, s.marqueePhase)
             .environment(\.snapshotAccessProblem, s.problem)
-            .environment(\.largeLayout, s.large)
             .environment(\.layoutProbe, s.probe)
             .environment(\.colorScheme, scheme)
             .environment(\.displayScale, 2)
@@ -358,7 +356,8 @@ enum SnapshotRenderer {
 extension SnapshotRenderer {
     /// Nærbillede af træet: den store krop (foto + lys, lak, kant) i 4× skala, et udsnit, og det tegnede reservetræ.
     static func woodCloseUp(_ dir: URL) {
-        let g = TurntableGeometry(size: CGSize(width: 328, height: WidgetView.largeClassicDeckHeight), cornerRadius: 20)
+        let g = TurntableGeometry(size: CGSize(width: 344, height: 344), cornerRadius: WidgetMetrics.cornerRadius,
+                                  deck: WidgetView.largeDeck(WidgetMetrics.bodySize(for: .large)))
         let style = TurntableStyle(plinth: .wood(.walnut), darkHardware: false)
         print(WoodTexture.findFile().map { "Træfoto: \($0.path)" } ?? "Intet træfoto fundet – bruger tegnet træ")
         func save(_ img: CGImage?, _ name: String) {
@@ -466,16 +465,15 @@ extension SnapshotRenderer {
             if !ok { failures += 1 }
             lines.append(String(format: "  %@ %@: %.2f (forventet %.2f, afvigelse %+.2f)", ok ? "OK" : "FEJL", label, value, expected, value - expected))
         }
-        for (size, large) in [(WidgetSize.small, LargeLayout.classic), (.medium, .classic), (.large, .classic),
-                              (.large, .wood), (.large, .centered), (.large, .cropped)] {
-            let base = Scene(name: "probe", events: [(0, track)], time: 4, size: size, large: large)
+        for size in WidgetSize.allCases {
+            let base = Scene(name: "probe", events: [(0, track)], time: 4, size: size)
             func r(_ name: String) -> CGRect? { var s = base; s.probe = name; return inkRect(s) }
             let body = WidgetMetrics.bodySize(for: size)
-            lines.append("\(size.title)\(size == .large ? " · " + large.title : "") (\(Int(body.width))×\(Int(body.height))):")
+            lines.append("\(size.title) (\(Int(body.width))×\(Int(body.height))):")
             let krop = r("krop")
             if let k = krop { lines.append(String(format: "     krop: x %.2f–%.2f, y %.2f–%.2f", k.minX, k.maxX, k.minY, k.maxY)) }
-            switch (size, large) {
-            case (.small, _):
+            switch size {
+            case .small:
                 check("krop venstre", krop?.minX, Layout.objectInset)
                 check("krop top", krop?.minY, Layout.objectInset)
                 check("krop højre", krop?.maxX, body.width - Layout.objectInset)
@@ -484,7 +482,7 @@ extension SnapshotRenderer {
                 check("pladens centrum (lodret) = kroppens midte", g.center.y, 74)
                 check("luft armbase → højre kant = luft LED → bund (gitter)", g.deck.maxX - (g.pivot.x + g.basePlateRadius),
                       g.deck.maxY - (g.ledCenter.y + g.speedButtonRadius))
-            case (.medium, _):
+            case .medium:
                 let col = WidgetView.mediumColumn(body)
                 check("krop venstre", krop?.minX, Layout.objectInset)
                 check("krop top", krop?.minY, Layout.objectInset)
@@ -502,47 +500,25 @@ extension SnapshotRenderer {
                     check("næste lodret midte = afspil midte", n.midY, a.midY)
                     check("afspil vandret midte = kolonnens midte", a.midX, col.x + col.width / 2)
                 }
-            case (.large, .classic):
-                check("krop venstre", krop?.minX, Layout.objectInset)
-                check("krop top", krop?.minY, Layout.objectInset)
-                check("krop højre", krop?.maxX, body.width - Layout.objectInset)
-                let kb = (krop?.maxY ?? 0)
-                check("titel versaltop = krop bund + 12", r("titel")?.minY, kb + Layout.gap)
-                check("titel venstre = 16", r("titel")?.minX, Layout.padding)
-                check("kildeikon venstre = 16", r("ikon")?.minX, Layout.padding)
-                // Tider flugter med deres ramme (typografisk), så linjen ikke hopper når cifrene skifter hvert sekund.
-                check("tid (start) ramme venstre = 16", r("tid-start#ramme")?.minX, Layout.padding)
-                check("tid (slut) ramme højre = 16 fra kant", r("tid-slut#ramme")?.maxX, body.width - Layout.padding)
-                check("afspil bund = 16 fra kant", r("afspil")?.maxY, body.height - Layout.padding)
+            case .large:
+                let panel = WidgetView.panelRect(body)
+                let deck = WidgetView.largeDeck(body)
+                check("krop fylder widgetten (venstre)", krop?.minX, 0)
+                check("krop fylder widgetten (bund)", krop?.maxY, body.height)
+                check("infobjælke venstre = 8", r("panel#ramme")?.minX, Layout.objectInset)
+                check("infobjælke højre = 8 fra kant", r("panel#ramme")?.maxX, body.width - Layout.objectInset)
+                check("infobjælke bund = 8 fra kant", r("panel#ramme")?.maxY, body.height - Layout.objectInset)
+                check("titel versaltop = bjælke top + 16", r("titel")?.minY, panel.minY + Layout.padding)
+                check("titel venstre = bjælke + 16", r("titel")?.minX, panel.minX + Layout.padding)
+                check("kildeikon venstre = bjælke + 16", r("ikon")?.minX, panel.minX + Layout.padding)
+                check("tid (start) ramme venstre = bjælke + 16", r("tid-start#ramme")?.minX, panel.minX + Layout.padding)
+                check("tid (slut) ramme højre = bjælke − 16", r("tid-slut#ramme")?.maxX, panel.maxX - Layout.padding)
+                check("afspil bund = bjælke bund − 16", r("afspil")?.maxY, panel.maxY - Layout.padding)
                 check("afspil vandret midte = widgettens midte", r("afspil")?.midX, body.width / 2)
-            case (.large, .wood):
-                check("infobjælke venstre = 8", r("panel")?.minX, Layout.objectInset)
-                check("infobjælke bund = 8 fra kant", r("panel")?.maxY, body.height - Layout.objectInset)
-                check("titel venstre = 16", r("titel")?.minX, Layout.padding)
-                check("titel versaltop = infobjælke top + 8", r("titel")?.minY, (r("panel")?.minY ?? 0) + Layout.objectInset)
-                check("afspil bund = 16 fra kant", r("afspil")?.maxY, body.height - Layout.padding)
-                check("afspil vandret midte = widgettens midte", r("afspil")?.midX, body.width / 2)
-            case (.large, .centered):
-                check("krop top = 16", krop?.minY, Layout.padding)
-                check("krop vandret midte = widgettens midte", krop?.midX, body.width / 2)
-                check("titel vandret midte = widgettens midte", r("titel")?.midX, body.width / 2)
-                check("afspil vandret midte = widgettens midte", r("afspil")?.midX, body.width / 2)
-                check("afspil bund = 16 fra kant", r("afspil")?.maxY, body.height - Layout.padding)
-            case (.large, .cropped):
-                let col = WidgetView.croppedColumn
-                check("krop top = 8", krop?.minY, Layout.objectInset)
-                check("krop bund = 8 fra kant", krop?.maxY, body.height - Layout.objectInset)
-                check("krop højre + 12 = kolonne", (krop?.maxX ?? 0) + Layout.gap, col.x)
-                check("titel versaltop = 16 (= krop top + 8)", r("titel")?.minY, Layout.padding)
-                check("cover (ramme) venstre = kolonne", r("cover#ramme")?.minX, col.x)
-                check("cover (ramme) højre = 16 fra kant", r("cover#ramme")?.maxX, body.width - Layout.padding)
-                check("titel venstre = kolonne", r("titel")?.minX, col.x)
-                check("kildeikon venstre = kolonne", r("ikon")?.minX, col.x)
-                check("tid (start) ramme venstre = kolonne", r("tid-start#ramme")?.minX, col.x)
-                check("tid (slut) ramme højre = 16 fra kant", r("tid-slut#ramme")?.maxX, body.width - Layout.padding)
-                check("forrige (blæk) venstre = kolonne", r("forrige")?.minX, col.x)
-                check("næste (blæk) højre = 16 fra kant", r("næste")?.maxX, body.width - Layout.padding)
-                check("afspil bund = 16 fra kant (= krop bund − 8)", r("afspil")?.maxY, body.height - Layout.padding)
+                let g = TurntableGeometry(size: body, cornerRadius: WidgetMetrics.cornerRadius, deck: deck)
+                let massMid = ((g.center.x - g.platterRadius) + (g.pivot.x + g.basePlateRadius)) / 2
+                check("plade+arm vandret midte = widgettens midte", massMid, body.width / 2)
+                check("dæk lodret midte = midt i det synlige over bjælken", deck.midY, panel.minY / 2)
             default: break
             }
             lines.append("")
@@ -552,19 +528,35 @@ extension SnapshotRenderer {
         print(lines.joined(separator: "\n"))
     }
 
-    // MARK: Forslag til Stor
+    // MARK: Stor "Helt træ" – endelig
 
-    static func largeProposals(_ dir: URL) {
-        var scenes: [Scene] = []
+    static func largeFinal(_ dir: URL) {
         let music = NowPlaying.BundleID.music
-        for large in LargeLayout.allCases {
-            for (theme, dark) in [(TurntableTheme.wood, true), (.wood, false), (.auto, true), (.auto, false)] {
-                scenes.append(Scene(name: "stor-\(large.rawValue)", events: [(0, np(theme == .auto ? 1 : 0, progress: 0.42, at: 0, app: music))],
-                                    time: 4, size: .large, theme: theme, dark: dark, large: large,
-                                    caption: "\(large.title) · \(theme.title) · \(dark ? "mørk" : "lys")"))
+        var scenes: [Scene] = []
+        for theme in TurntableTheme.allCases {
+            for dark in [true, false] {
+                scenes.append(Scene(name: "A-\(theme.rawValue)", events: [(0, np(theme == .auto ? 1 : 0, progress: 0.42, at: 0, app: music))],
+                                    time: 4, size: .large, theme: theme, dark: dark,
+                                    caption: "\(theme.title) · \(dark ? "mørk" : "lys")"))
             }
         }
-        sheet("stor-forslag", scenes, dir: dir, columns: 4, scale: 3)
+        let problem = SourceAccessProblem(bundleID: NowPlaying.BundleID.spotify, message: "Giv adgang til Spotify i Systemindstillinger")
+        scenes += [
+            Scene(name: "A-pause", events: [(0, np(0, playing: false, progress: 0.42, at: 0, app: music))], time: 4, size: .large,
+                  caption: "pause · mørk"),
+            Scene(name: "A-pause-lys", events: [(0, np(1, playing: false, progress: 0.42, at: 0, app: music))], time: 4, size: .large,
+                  theme: .aluminium, dark: false, caption: "pause · Aluminium · lys"),
+            Scene(name: "A-intet", events: [(0, np(0, progress: 0.4, at: 0)), (1, nil)], time: 4, size: .large, caption: "intet spiller · mørk"),
+            Scene(name: "A-intet-lys", events: [(0, nil)], time: 4, size: .large, dark: false, caption: "intet spiller · lys"),
+            Scene(name: "A-adgang", events: [(0, nil)], time: 4, size: .large, problem: problem, caption: "manglende adgang"),
+            Scene(name: "A-daempet", events: [(0, np(0, progress: 0.42, at: 0, app: music))], time: 4, size: .large, dim: 1, desktop: true,
+                  caption: "dæmpet (100 %)"),
+            Scene(name: "A-lang", events: [(0, np(2, progress: 0.2, at: 0, app: music))], time: 4, size: .large, marqueePhase: 0.3,
+                  caption: "lang titel (rulletekst) · uden cover"),
+            Scene(name: "A-45", events: [(0, np(0, progress: 0.42, at: 0, app: music))], time: 4, size: .large, speed: .rpm45,
+                  caption: "45 aktiv"),
+        ]
+        sheet("stor-A-endelig", scenes, dir: dir, columns: 4, scale: 3)
     }
 
     // MARK: Før/efter for Mellem og Lille
