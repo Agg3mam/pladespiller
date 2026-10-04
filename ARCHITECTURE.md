@@ -79,3 +79,4 @@ En agent ændrer kun sine egne filer. Ændringer i fælles filer bestilles hos h
 - **2026-10-04 · QA-rettelser efter bølge 2 flettet** (musik 364870a, vindue 5a2a1a4, grafik 30e3e80). N2 (etiket én sang bagud) bekræftet rettet live af hovedagenten
   med billeder af løkken; N1 (dæmpning) bevist i det lag der sidder i viewet. Placering gemmes nu som øverste venstre hjørne.
 - **2026-10-04 · Brugerfeedback:** design ikke polished nok (ting sidder ikke lige), pladen lidt for hurtig → `secondsPerRevolution` 2,25 s (≈27 o/min); stor størrelse skal redesignes.
+- **2026-10-04 · Hastighed kan vælges:** `SpinSpeed` (Langsom 3 s / Rolig 2,25 s standard / 33⅓ 1,8 s / 45 1,33 s) i `Settings.spinSpeed`. Menu ▸ Hastighed (Vindue); rotation + 33/45-knapper på kroppen (Grafik).

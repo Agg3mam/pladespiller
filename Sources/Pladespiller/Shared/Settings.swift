@@ -38,6 +38,31 @@ enum ColorMode: String, CaseIterable, Identifiable {
     }
 }
 
+/// Hvor hurtigt pladen drejer.
+enum SpinSpeed: String, CaseIterable, Identifiable {
+    case slow, calm, rpm33, rpm45
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .slow: "Langsom"
+        case .calm: "Rolig"
+        case .rpm33: "33⅓ o/min (ægte)"
+        case .rpm45: "45 o/min"
+        }
+    }
+    /// Sekunder pr. omgang.
+    var secondsPerRevolution: TimeInterval {
+        switch self {
+        case .slow: 3.0          // 20 o/min
+        case .calm: 2.25         // ≈27 o/min
+        case .rpm33: 1.8         // 33⅓ o/min
+        case .rpm45: 60.0 / 45   // 45 o/min
+        }
+    }
+    /// Hvilken af kroppens to knapper der lyser (33 eller 45).
+    var isFortyFive: Bool { self == .rpm45 }
+}
+
 /// Alle brugerindstillinger, gemt i UserDefaults. "Åbn ved login" gemmes ikke her:
 /// sandheden er `SMAppService.mainApp.status`.
 @Observable
@@ -47,6 +72,7 @@ final class Settings {
         static let theme = "pladespiller.theme"
         static let colorMode = "pladespiller.colorMode"
         static let positionLocked = "pladespiller.positionLocked"
+        static let spinSpeed = "pladespiller.spinSpeed"
         /// Skærmen widgetten sidst stod på (stabilt skærm-id).
         static let lastScreenID = "pladespiller.lastScreenID"
         /// Placering pr. skærm: `placement.<skærm-id>` → `"x,y"` (vinduets øverste venstre hjørne, AppKit-skærmkoordinater).
@@ -58,6 +84,7 @@ final class Settings {
         static let theme: TurntableTheme = .wood   // TODO: spørg brugeren (afsnit 7)
         static let colorMode: ColorMode = .automatic
         static let positionLocked = false
+        static let spinSpeed: SpinSpeed = .calm
     }
 
     @ObservationIgnored private let defaults: UserDefaults
@@ -66,6 +93,7 @@ final class Settings {
     var theme: TurntableTheme { didSet { defaults.set(theme.rawValue, forKey: Key.theme) } }
     var colorMode: ColorMode { didSet { defaults.set(colorMode.rawValue, forKey: Key.colorMode) } }
     var positionLocked: Bool { didSet { defaults.set(positionLocked, forKey: Key.positionLocked) } }
+    var spinSpeed: SpinSpeed { didSet { defaults.set(spinSpeed.rawValue, forKey: Key.spinSpeed) } }
     var lastScreenID: String? { didSet { defaults.set(lastScreenID, forKey: Key.lastScreenID) } }
 
     init(defaults: UserDefaults = .standard) {
@@ -74,6 +102,7 @@ final class Settings {
         theme = defaults.string(forKey: Key.theme).flatMap(TurntableTheme.init) ?? Default.theme
         colorMode = defaults.string(forKey: Key.colorMode).flatMap(ColorMode.init) ?? Default.colorMode
         positionLocked = defaults.object(forKey: Key.positionLocked) as? Bool ?? Default.positionLocked
+        spinSpeed = defaults.string(forKey: Key.spinSpeed).flatMap(SpinSpeed.init) ?? Default.spinSpeed
         lastScreenID = defaults.string(forKey: Key.lastScreenID)
     }
 
