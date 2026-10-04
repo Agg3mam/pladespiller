@@ -78,3 +78,4 @@ En agent ændrer kun sine egne filer. Ændringer i fælles filer bestilles hos h
   Dæmpning: "Automatisk" følger Apples Widgetstil (widgetAppearance 1 = Fuld farve → ingen dæmpning), ellers Finder-reglen.
 - **2026-10-04 · QA-rettelser efter bølge 2 flettet** (musik 364870a, vindue 5a2a1a4, grafik 30e3e80). N2 (etiket én sang bagud) bekræftet rettet live af hovedagenten
   med billeder af løkken; N1 (dæmpning) bevist i det lag der sidder i viewet. Placering gemmes nu som øverste venstre hjørne.
+- **2026-10-04 · Brugerfeedback:** design ikke polished nok (ting sidder ikke lige), pladen lidt for hurtig → `secondsPerRevolution` 2,25 s (≈27 o/min); stor størrelse skal redesignes.

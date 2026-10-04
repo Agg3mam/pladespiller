@@ -40,7 +40,7 @@ enum WidgetMetrics {
     static let snapDuration: TimeInterval = 0.28
 
     // Pladespiller-bevægelse
-    static let secondsPerRevolution: TimeInterval = 1.8   // 33⅓ o/min
+    static let secondsPerRevolution: TimeInterval = 2.25  // ≈27 o/min (brugeren syntes 33⅓ var lidt for hurtigt)
     static let spinUpDuration: TimeInterval = 0.8
     static let spinDownDuration: TimeInterval = 1.2
     static let trackChangeDuration: TimeInterval = 0.9    // skal være under 1 s
