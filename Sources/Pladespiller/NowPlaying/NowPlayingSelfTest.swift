@@ -122,6 +122,44 @@ enum NowPlayingSelfTest {
                    "Kort adgangstekst: “\(ask)” / “\(deny)”")
         }
 
+        // Spoling: set-event, klemning, optimistisk opdatering, sammenslåning
+        let seekEvent = AE.setPlayerPositionEvent(42.5, target: NSAppleEventDescriptor(processIdentifier: getpid()))
+        let seekDirect = seekEvent.paramDescriptor(forKeyword: AE.fcc("----"))
+        expect(seekEvent.eventClass == AE.fcc("core") && seekEvent.eventID == AE.fcc("setd")
+               && seekDirect.map(specifierShape) == ["prop:prop:pPos"]
+               && seekDirect?.forKeyword(AE.fcc("from"))?.descriptorType == AE.fcc("null")
+               && seekEvent.paramDescriptor(forKeyword: AE.fcc("data"))?.doubleValue == 42.5,
+               "Spole-event: core/setd, direkte = player position af appen, data = 42.5")
+        if let ref = NSAppleScript(source: "return a reference to «class pPos»")?.executeAndReturnError(nil) {
+            expect(seekDirect.map(specifierShape) == specifierShape(ref), "Spole-specifier = AppleScripts")
+        }
+        expect(PlayerAppSource.clampSeek(-5, duration: 200) == 0 && PlayerAppSource.clampSeek(250, duration: 200) == 200
+               && PlayerAppSource.clampSeek(80, duration: 200) == 80 && PlayerAppSource.clampSeek(10, duration: 0) == nil,
+               "Spoling klemmes til [0, varighed]; radio (varighed 0) spoler ikke")
+        let seeker = SeekRecordingSource()
+        seeker.apply(PlayerStatus(state: .playing, title: "A", artist: "B", album: "C", duration: 200, position: 10, trackID: "s1"),
+                     measuredAt: Date())
+        seeker.seek(to: 90)
+        expect(abs((seeker.current?.position(at: Date()) ?? 0) - 90) < 0.05, "Optimistisk spoling: position med det samme")
+        let dragStart = Date()
+        var requested = 90.0
+        while Date().timeIntervalSince(dragStart) < 0.5 {      // træk: et kald hvert 10. ms i 0,5 s
+            requested += 0.5
+            seeker.seek(to: requested)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+        let settle = Date()
+        while Date().timeIntervalSince(settle) < 0.4 { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
+        let gaps = zip(seeker.sentAt.dropFirst(), seeker.sentAt).map { $0.timeIntervalSince($1) }
+        expect(seeker.sent.count >= 3 && seeker.sent.count <= 8 && (gaps.min() ?? 1) >= 0.09,
+               "Træk slås sammen: \(seeker.sent.count) events for ~50 kald, mindst 100 ms imellem")
+        expect(seeker.sent.last == requested, "Sidste spoling sendes altid (\(seeker.sent.last ?? -1) = \(requested))")
+        let none = SeekRecordingSource()
+        none.apply(PlayerStatus(state: .playing, title: "Radio", duration: 0, position: 5, trackID: "r"), measuredAt: Date())
+        none.seek(to: 30)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+        expect(none.sent.isEmpty && abs((none.current?.position(at: Date()) ?? 0) - 5) < 0.3, "Radio: spoling ignoreres")
+
         // Scripts starter aldrig appen
         for (name, src) in [("Spotify status", SpotifySource.statusScriptSource), ("Musik status", MusicSource.statusScriptSource),
                             ("Musik cover", MusicSource.artworkScriptSource),
@@ -213,6 +251,17 @@ enum NowPlayingSelfTest {
         // AppleScript uden tell-blok har ikke appen som rod; sidste led er derfor en ren type (pTrk).
         if let root = cur, root.descriptorType == AE.fcc("type") { out.append("prop:prop:\(AE.fourCCString(root.typeCodeValue))") }
         return out
+    }
+
+    private final class SeekRecordingSource: PlayerAppSource {
+        var sent: [TimeInterval] = []
+        var sentAt: [Date] = []
+        init() { super.init(bundleID: "test.seek", shortName: "test", displayName: "Test") }
+        override func performSeek(_ target: TimeInterval) async {
+            sent.append(target)
+            sentAt.append(Date())
+        }
+        override func loadArtwork(for status: PlayerStatus) async -> ArtworkResult { .none }
     }
 
     private final class CountingArtworkSource: PlayerAppSource {

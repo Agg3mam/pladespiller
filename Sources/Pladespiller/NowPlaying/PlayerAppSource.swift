@@ -156,6 +156,78 @@ class PlayerAppSource: NowPlayingSource, AccessReporting {
     }
 
     func playPause() { send(.playPause) }
+
+    // MARK: Spoling
+
+    /// Højst ét spole-event pr. så mange sekunder mens der trækkes; det sidste sendes altid.
+    var seekInterval: TimeInterval = 0.1
+    private var pendingSeek: TimeInterval?
+    private var seekLoopRunning = false
+    private var lastSeekSentAt = Date.distantPast
+
+    /// Klemmer til [0, varighed]. nil når der ikke kan spoles (ukendt varighed, fx radio).
+    static func clampSeek(_ position: TimeInterval, duration: TimeInterval) -> TimeInterval? {
+        guard duration > 0, position.isFinite else { return nil }
+        return min(max(0, position), duration)
+    }
+
+    func seek(to position: TimeInterval) {
+        guard let np = current, let target = Self.clampSeek(position, duration: np.duration) else { return }
+        applyOptimisticSeek(target)
+        pendingSeek = target
+        runSeekLoop()
+    }
+
+    /// Optimistisk: armen/stregen springer med det samme. Statussvar startet før er forældede.
+    func applyOptimisticSeek(_ target: TimeInterval, at date: Date = .now) {
+        stateGeneration += 1
+        guard var np = current else { return }
+        np.position = target
+        np.positionTimestamp = date
+        set(np, significant: true)
+        if var s = status { s.position = target; status = s }
+    }
+
+    /// Sender ventende spolinger: højst én pr. `seekInterval`, altid den nyeste, og bekræfter bagefter.
+    private func runSeekLoop() {
+        guard !seekLoopRunning else { return }
+        seekLoopRunning = true
+        Task {
+            while self.pendingSeek != nil {
+                let wait = self.seekInterval - Date().timeIntervalSince(self.lastSeekSentAt)
+                if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
+                guard let target = self.pendingSeek else { break }
+                self.pendingSeek = nil
+                self.lastSeekSentAt = Date()
+                await self.performSeek(target)
+                self.stateGeneration += 1     // statussvar startet under afsendelsen er også forældede
+            }
+            self.seekLoopRunning = false
+            // Bekræft (Musik sender ingen notifikation ved spoling).
+            try? await Task.sleep(for: .milliseconds(200))
+            if self.pendingSeek == nil, !self.seekLoopRunning { self.requestFetch(reason: "efter spoling") }
+        }
+    }
+
+    /// Sender selve spolingen til appen. (Overskrives i selvtesten.)
+    func performSeek(_ target: TimeInterval) async {
+        guard let pid = runningPID else { return }
+        if access == .denied { NowPlayingLog.log("[\(shortName)] spol: ingen tilladelse – sender intet"); return }
+        guard await ensureAccess() else { return }
+        let outcome: Timed<ScriptValue>
+        if Self.useAppleScript {
+            outcome = await AppleScriptRunner.shared.run(AppleScriptTemplate.guarded(
+                bundleID: bundleID, body: "set player position to \(String(format: "%.3f", target))", otherwise: ""))
+        } else {
+            outcome = await events.run(pid: pid) { t throws(ScriptError) in try t.setPlayerPosition(target); return ScriptValue.missing }
+        }
+        switch outcome.result {
+        case .success: NowPlayingLog.log("[\(shortName)] spolet til \(String(format: "%.1f", target)) s (\(outcome.milliseconds) ms)")
+        case .failure(let e):
+            NowPlayingLog.log("[\(shortName)] spol fejlede: \(e)")
+            if e.isNotAuthorized { handleAccess(.denied) }
+        }
+    }
     func nextTrack() { send(.next) }
     func previousTrack() { send(.previous) }
 

@@ -26,11 +26,12 @@ nonisolated struct AETarget: @unchecked Sendable {   // oprettes og bruges kun p
     @discardableResult
     func send(_ eventClass: String, _ eventID: String, direct: NSAppleEventDescriptor? = nil,
               params: [(String, NSAppleEventDescriptor)] = []) throws(ScriptError) -> ScriptValue {
-        let event = NSAppleEventDescriptor(eventClass: AE.fcc(eventClass), eventID: AE.fcc(eventID),
-                                           targetDescriptor: address, returnID: AEReturnID(kAutoGenerateReturnID),
-                                           transactionID: AETransactionID(kAnyTransactionID))
-        if let direct { event.setParam(direct, forKeyword: AE.fcc("----")) }
-        for (k, v) in params { event.setParam(v, forKeyword: AE.fcc(k)) }
+        try send(AE.event(eventClass, eventID, target: address, direct: direct, params: params))
+    }
+
+    /// Sender et færdigt event.
+    @discardableResult
+    func send(_ event: NSAppleEventDescriptor) throws(ScriptError) -> ScriptValue {
         let reply: NSAppleEventDescriptor
         do {
             reply = try event.sendEvent(options: [.waitForReply], timeout: timeout)
@@ -44,6 +45,11 @@ nonisolated struct AETarget: @unchecked Sendable {   // oprettes og bruges kun p
         }
         guard let result = reply.paramDescriptor(forKeyword: AE.fcc("----")) else { return .missing }
         return AE.value(from: result)
+    }
+
+    /// `set player position to <sekunder>`.
+    func setPlayerPosition(_ seconds: TimeInterval) throws(ScriptError) {
+        try send(AE.setPlayerPositionEvent(seconds, target: address))
     }
 
     /// `get <specifier>`.
@@ -96,6 +102,23 @@ nonisolated enum AccessState: Equatable, Sendable {
 nonisolated enum AE {
     /// Appen selv (rod for alle specifiers).
     static var app: NSAppleEventDescriptor { .null() }
+
+    /// Et Apple Event til `target` (bygges uden at blive sendt; bruges også af selvtesten).
+    static func event(_ eventClass: String, _ eventID: String, target: NSAppleEventDescriptor,
+                      direct: NSAppleEventDescriptor? = nil, params: [(String, NSAppleEventDescriptor)] = []) -> NSAppleEventDescriptor {
+        let event = NSAppleEventDescriptor(eventClass: fcc(eventClass), eventID: fcc(eventID),
+                                           targetDescriptor: target, returnID: AEReturnID(kAutoGenerateReturnID),
+                                           transactionID: AETransactionID(kAnyTransactionID))
+        if let direct { event.setParam(direct, forKeyword: fcc("----")) }
+        for (k, v) in params { event.setParam(v, forKeyword: fcc(k)) }
+        return event
+    }
+
+    /// `set player position to <sekunder>` = core/setd, direkte objekt = egenskaben pPos af appen,
+    /// parameter 'data' = tallet (real). pPos er skrivbar i både Spotify.sdef og com.apple.Music.sdef.
+    static func setPlayerPositionEvent(_ seconds: TimeInterval, target: NSAppleEventDescriptor) -> NSAppleEventDescriptor {
+        event("core", "setd", target: target, direct: prop("pPos"), params: [("data", NSAppleEventDescriptor(double: seconds))])
+    }
 
     /// `<egenskab> of <container>`, fx `prop("pPlS")` = player state.
     static func prop(_ code: String, of container: NSAppleEventDescriptor = app) -> NSAppleEventDescriptor {

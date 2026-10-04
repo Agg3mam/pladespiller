@@ -6,7 +6,7 @@ import AppKit
 /// Flag:
 ///   --mock                 testkilden i stedet for Spotify/Musik
 ///   --selftest             kør parser-/logiktest på eksempeldata (sender ingen Apple Events) og afslut
-///   --cmd playpause|next|previous   send en kommando 2 s efter start
+///   --cmd playpause|next|previous|seek:<sekunder>   send en kommando 2 s efter start
 ///   --app spotify|music    hvilken app --cmd sendes til (standard: den der vises)
 ///   --print-scripts        udskriv AppleScript-reservens scripts, og afslut
 ///   --applescript          brug AppleScript-reserven i stedet for Apple Events til pid (virker også i appen)
@@ -68,7 +68,10 @@ enum NowPlayingDebugCLI {
                     case "playpause": target.map { $0.playPause() } ?? store.playPause()
                     case "next": target.map { $0.nextTrack() } ?? store.nextTrack()
                     case "previous", "prev": target.map { $0.previousTrack() } ?? store.previousTrack()
-                    default: out("Ukendt kommando: \(cmd) (brug playpause, next, previous)")
+                    case let c where c.hasPrefix("seek:"):
+                        let secs = Double(c.dropFirst(5).replacingOccurrences(of: ",", with: ".")) ?? 0
+                        target.map { $0.seek(to: secs) } ?? store.seek(to: secs)
+                    default: out("Ukendt kommando: \(cmd) (brug playpause, next, previous, seek:<sekunder>)")
                     }
                 }
             }
