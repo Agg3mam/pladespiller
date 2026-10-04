@@ -37,6 +37,12 @@ final class WidgetMenu {
         }
         menu.addItem(submenu("Tema", theme))
 
+        let speed = NSMenu()
+        for v in SpinSpeed.allCases {
+            speed.addItem(item(v.title, checked: settings.spinSpeed == v) { [settings] in settings.spinSpeed = v })
+        }
+        menu.addItem(submenu("Hastighed", speed))
+
         let colors = NSMenu()
         for c in ColorMode.allCases {
             colors.addItem(item(c.title, checked: settings.colorMode == c) { [settings] in settings.colorMode = c })

@@ -121,7 +121,7 @@ enum WindowSelfTest {
             let menu = builder.build()
             let titles = menu.items.map { $0.isSeparatorItem ? "—" : $0.title }
             print("     menu:", titles.joined(separator: " | "))
-            check("menupunkter", titles == ["Lille", "Mellem", "Stor", "—", "Tema", "Farver", "—",
+            check("menupunkter", titles == ["Lille", "Mellem", "Stor", "—", "Tema", "Hastighed", "Farver", "—",
                                             "Lås placering", "Åbn ved login", "—", "Fjern widget"], "\(titles)")
             check("flueben ved Stor", menu.item(withTitle: "Stor")?.state == .on && menu.item(withTitle: "Lille")?.state == .off)
             let tema = menu.item(withTitle: "Tema")?.submenu
@@ -133,6 +133,14 @@ enum WindowSelfTest {
             if let i = menu.item(withTitle: "Lille") , let a = i.action { _ = (i.target as? NSObject)?.perform(a, with: i) }
             if let i = tema?.item(withTitle: "Aluminium") , let a = i.action { _ = (i.target as? NSObject)?.perform(a, with: i) }
             check("menuhandling sætter indstillinger", settings.size == .small && settings.theme == .aluminium)
+            settings.spinSpeed = .calm
+            let hastighed = menu.item(withTitle: "Hastighed")?.submenu
+            check("Hastighed-undermenu", hastighed?.items.map(\.title) == SpinSpeed.allCases.map(\.title)
+                  && hastighed?.items.filter { $0.state == .on }.count == 1)
+            if let i = hastighed?.item(withTitle: SpinSpeed.rpm45.title), let a = i.action {
+                _ = (i.target as? NSObject)?.perform(a, with: i)
+            }
+            check("menuhandling sætter spinSpeed", settings.spinSpeed == .rpm45, "\(settings.spinSpeed)")
             withExtendedLifetime(builder) {}
             UserDefaults.standard.removePersistentDomain(forName: "pladespiller.selftest.menu")
         }
