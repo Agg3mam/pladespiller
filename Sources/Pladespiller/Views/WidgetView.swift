@@ -24,9 +24,14 @@ struct WidgetView: View {
             }
         }
         .frame(width: body.width, height: body.height)
+        .background { if liveSnapshot == nil { WindowVisibilityReader() } }   // kun live (ImageRenderer kan ikke tegne NSViews)
+        .environment(\.windowIsVisible, windowVisible)
     }
 
     @Environment(\.snapshotAccessProblem) private var snapshotProblem
+    @Environment(\.turntableSnapshot) private var liveSnapshot
+    /// Vinduet er synligt (ikke dækket). Tid og rulletekst kører kun når det er sandt (QA N9).
+    private var windowVisible: Bool { WindowVisibility.shared.isVisible }
     private var np: NowPlaying? { store.current }
     private var problem: SourceAccessProblem? { snapshotProblem ?? store.accessProblem }
     private var dim: Double { presentation.dimAmount }
@@ -48,13 +53,18 @@ struct WidgetView: View {
     private func small(_ body: CGSize) -> some View {
         let side = body.height - Self.inset * 2
         return turntable(CGSize(width: side, height: side))
+            .overlay(alignment: .topLeading) {
+                // Manglende adgang: øverst til venstre (dækker hverken etiket, arm eller 33/45-knapper), højst 2 linjer.
+                if let problem {
+                    StatusCapsule(text: problem.message, warning: true) { store.openAutomationSettings() }
+                        .padding(7)
+                }
+            }
             .overlay(alignment: .bottomLeading) {
                 Group {
-                    if np == nil {
-                        StatusCapsule(text: problem?.message ?? "Intet spiller", warning: problem != nil) { store.openAutomationSettings() }
-                    } else if let problem {
-                        StatusCapsule(text: problem.message, warning: true) { store.openAutomationSettings() }
-                    } else if presentation.isHovering, let np {
+                    if np == nil, problem == nil {
+                        StatusCapsule(text: "Intet spiller", warning: false)
+                    } else if problem == nil, presentation.isHovering, let np {
                         HoverPlayButton(isPlaying: np.isPlaying) { store.playPause() }
                             .transition(.opacity)
                     }
@@ -143,13 +153,15 @@ struct TrackHeader: View {
     let artistSize: CGFloat
     let showAlbum: Bool
     var onProblemTap: () -> Void = {}
+    @Environment(\.windowIsVisible) private var windowVisible
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             if let np {
-                MarqueeText(text: TrackStrings.title(np), size: titleSize, width: width, active: np.isPlaying)
+                MarqueeText(text: TrackStrings.title(np), size: titleSize, width: width, active: np.isPlaying && windowVisible)
                 if let problem {
                     ProblemText(message: problem.message, size: artistSize - 1, action: onProblemTap)
+                        .layoutPriority(1)
                 } else {
                     Text(TrackStrings.artist(np))
                         .font(.system(size: artistSize))
@@ -166,7 +178,7 @@ struct TrackHeader: View {
                 Text("Intet spiller")
                     .font(.system(size: titleSize, weight: .semibold))
                     .foregroundStyle(.secondary)
-                if let problem { ProblemText(message: problem.message, size: artistSize - 1, action: onProblemTap) }
+                if let problem { ProblemText(message: problem.message, size: artistSize - 1, action: onProblemTap).layoutPriority(1) }
             }
         }
     }
@@ -179,12 +191,14 @@ struct ProblemText: View {
     var body: some View {
         Button(action: action) { label }
             .buttonStyle(WidgetButtonStyle())
-            .help("Åbn Systemindstillinger › Anonymitet og sikkerhed › Automatisering")
     }
 
     private var label: some View {
         Label {
-            Text(message).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            Text(message)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
         } icon: {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
         }
@@ -197,9 +211,10 @@ struct ProblemText: View {
 struct TimeText: View {
     let np: NowPlaying
     @Environment(\.turntableSnapshot) private var snapshot
+    @Environment(\.windowIsVisible) private var windowVisible
 
     var body: some View {
-        if np.isPlaying && snapshot == nil {
+        if np.isPlaying && snapshot == nil && windowVisible {
             TimelineView(.periodic(from: .now, by: 1)) { ctx in label(at: ctx.date) }
         } else {
             label(at: snapshot == nil ? .now : np.positionTimestamp)
@@ -229,7 +244,6 @@ struct TransportButtons: View {
         let s: CGFloat = compact ? 13 : 15
         HStack(spacing: compact ? 6 : 10) {
             Button(action: previous) { symbol("backward.fill", s) }
-                .help("Forrige")
                 .accessibilityLabel("Forrige")
             Button(action: playPause) {
                 Image(systemName: isPlaying ? "pause.fill" : "play.fill")
@@ -238,10 +252,8 @@ struct TransportButtons: View {
                     .background(Circle().fill(.primary.opacity(0.11)))
                     .contentShape(Circle())
             }
-            .help(isPlaying ? "Pause" : "Afspil")
             .accessibilityLabel(isPlaying ? "Pause" : "Afspil")
             Button(action: next) { symbol("forward.fill", s) }
-                .help("Næste")
                 .accessibilityLabel("Næste")
         }
         .buttonStyle(WidgetButtonStyle())
@@ -301,13 +313,14 @@ struct StatusCapsule: View {
     private var capsule: some View {
         HStack(spacing: 4) {
             if warning { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
-            Text(text).lineLimit(2)
+            Text(text).lineLimit(2).multilineTextAlignment(.leading)
         }
         .font(.system(size: 10, weight: .semibold))
         .foregroundStyle(.white.opacity(0.92))
-        .padding(.horizontal, 7).padding(.vertical, 3)
-        .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .padding(.horizontal, 7).padding(.vertical, 4)
+        .background(.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
         .frame(maxWidth: 120, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -329,7 +342,6 @@ struct SourceIcon: View {
             }
         }
         .buttonStyle(WidgetButtonStyle())
-        .help("Åbn \(SourceApp.name(for: bundleID) ?? "musikappen")")
         .accessibilityLabel("Åbn \(SourceApp.name(for: bundleID) ?? "musikappen")")
     }
 }
@@ -343,12 +355,18 @@ enum TitleStyle: String, CaseIterable {
 private struct TitleStyleKey: EnvironmentKey { static let defaultValue: TitleStyle = .marquee }
 private struct MarqueePhaseKey: EnvironmentKey { static let defaultValue: Double? = nil }
 private struct SnapshotProblemKey: EnvironmentKey { static let defaultValue: SourceAccessProblem? = nil }
+private struct WindowIsVisibleKey: EnvironmentKey { static let defaultValue = true }
 
 extension EnvironmentValues {
     /// Hvordan lange titler vises. Brugerens valg: rulletekst.
     var titleStyle: TitleStyle {
         get { self[TitleStyleKey.self] }
         set { self[TitleStyleKey.self] = newValue }
+    }
+    /// Widgettens vindue er synligt (ikke dækket af andre vinduer).
+    var windowIsVisible: Bool {
+        get { self[WindowIsVisibleKey.self] }
+        set { self[WindowIsVisibleKey.self] = newValue }
     }
     /// Kun snapshots: et adgangsproblem at vise (butikken sætter det selv live).
     var snapshotAccessProblem: SourceAccessProblem? {

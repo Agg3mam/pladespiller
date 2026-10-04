@@ -11,7 +11,8 @@ import QuartzCore
 final class TurntableLayer {
     /// Yderste lag: dæmpning (opacitet). `root` indeni: "intet spiller"-dæmpning.
     let container = CALayer()
-    let root = CALayer()
+    /// Kun til internt brug; viewet skal altid hoste `container` (QA N1).
+    private let root = CALayer()
     private let plinth = CALayer()
     private let plinthGray = CALayer()
     private let platter = CALayer()
@@ -33,6 +34,7 @@ final class TurntableLayer {
     private(set) var geometry: TurntableGeometry?
     private(set) var style: TurntableStyle?
     private(set) var scale: CGFloat = 2
+    private var woodGeneration = -1
 
     private var allLayers: [CALayer] {
         [container, root, plinth, plinthGray, platter, rotor, record, labelLayer, labelGray, previousGroup,
@@ -84,7 +86,8 @@ final class TurntableLayer {
 
     /// Byg billeder og placér lagene (billigt hvis intet er ændret: billederne caches).
     func configure(_ g: TurntableGeometry, style: TurntableStyle, scale: CGFloat) {
-        guard g != geometry || style != self.style || scale != self.scale else { return }
+        guard g != geometry || style != self.style || scale != self.scale || woodGeneration != WoodTexture.generation else { return }
+        woodGeneration = WoodTexture.generation
         let geometryChanged = g != geometry || scale != self.scale
         geometry = g
         self.style = style
@@ -111,7 +114,7 @@ final class TurntableLayer {
             plinthGray.add(fade, forKey: "plinthFade")
         }
         plinth.contents = newPlinth
-        plinthGray.contents = TurntableImages.gray("plinth|\(style)", g, scale, newPlinth)
+        plinthGray.contents = TurntableImages.gray("plinth|\(style)|træ\(WoodTexture.generation)", g, scale, newPlinth)
 
         if geometryChanged {
             platter.frame = square(g.center, half: g.platterRadius + RecordRenderer.platterMargin(g))
@@ -199,6 +202,37 @@ final class TurntableLayer {
 
     // MARK: Live-animation
 
+    /// Nøglerne for de korte overgangsanimationer (løft, LED, etiket, tomgang).
+    static let transitionKeys: Set<String> = ["lift", "liftOpacity", "fade", "led", "idle"]
+
+    /// QA N2 (sikkerhedsnet): når overgangene burde være færdige, fjernes de korte animationer, og lagene sættes
+    /// til sluttilstanden. Så kan en overgang aldrig blive hængende på sin startværdi indtil næste hændelse.
+    func settle(_ animator: TurntableAnimator, at t: Double) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for l in allLayers {
+            for k in l.animationKeys() ?? [] where Self.transitionKeys.contains(k) { l.removeAnimation(forKey: k) }
+        }
+        let pose = animator.pose(at: max(t, animator.transitionsEnd(after: t)))
+        setLabels(pose)
+        armImage.setValue(armScale(pose.armLift), forKeyPath: "transform.scale")
+        shadowImage.setValue(shadowScale(pose.armLift), forKeyPath: "transform.scale")
+        shadowImage.opacity = Float(shadowOpacity(pose.armLift))
+        shadowMove.position = shadowOffset(pose.armLift)
+        previousGroup.opacity = Float(pose.previousLabelOpacity)
+        ledGlow.opacity = Float(pose.led)
+        root.opacity = Float(rootOpacity(pose.idle))
+        CATransaction.commit()
+    }
+
+    /// Når vinduet ikke er synligt: ingen animationer, og lagene viser SLUTtilstanden (ikke starten af en overgang).
+    func applyFinal(_ animator: TurntableAnimator, at t: Double) {
+        stopAnimations()
+        var pose = animator.pose(at: animator.transitionsEnd(after: t))
+        pose.recordAngle = animator.spin.angle(at: t)
+        apply(pose)
+    }
+
     /// Fjern alle animationer (fx når vinduet ikke er synligt).
     func stopAnimations() {
         // Dæmpning og kroppens overtoning hører ikke til bevægelsen og må gerne løbe færdig.
@@ -220,14 +254,19 @@ final class TurntableLayer {
         CATransaction.setDisableActions(true)
         stopAnimations()
 
-        // Rotor: rampe (keyframes af den integrerede vinkel) + evt. uendelig jævn omdrejning bagefter.
+        // Rotor: rampe (keyframes af den integrerede vinkel) + evt. uendelig jævn omdrejning bagefter – samlet i én
+        // gruppe med RELATIVE tider (QA N2): ingen absolutte beginTime'er, som kan forskydes af vinduets tidsbase.
         let spin = animator.spin
         let rampEnd = max(t, spin.rampEnd)
+        var parts: [CAAnimation] = []
         if rampEnd > t {
             let times = Self.samples(from: t, to: rampEnd, step: 1.0 / 60)
-            // K2: fillMode/isRemovedOnCompletion sættes før add (add kopierer animationen).
-            keyframes(rotor, "transform.rotation.z", times, times.map { -spin.angle(at: $0) }, key: "spinRamp",
-                      fillMode: .forwards, removedOnCompletion: spin.targetVelocity == 0)
+            let ramp = CAKeyframeAnimation(keyPath: "transform.rotation.z")
+            ramp.values = times.map { -spin.angle(at: $0) }
+            ramp.keyTimes = times.map { NSNumber(value: ($0 - t) / (rampEnd - t)) }
+            ramp.duration = rampEnd - t
+            ramp.calculationMode = .linear
+            parts.append(ramp)
         }
         if spin.targetVelocity > 0 {
             let a = spin.angle(at: rampEnd)
@@ -236,13 +275,20 @@ final class TurntableLayer {
             cruise.toValue = -(a + 2 * .pi)
             cruise.duration = WidgetMetrics.secondsPerRevolution
             cruise.repeatCount = .infinity
-            cruise.beginTime = rotor.convertTime(rampEnd, from: nil)
-            cruise.fillMode = .forwards
-            cruise.preferredFrameRateRange = Self.smoothRange
-            rotor.add(cruise, forKey: "spinCruise")
+            cruise.beginTime = rampEnd - t          // relativt til gruppen
+            parts.append(cruise)
             rotor.setValue(-spin.angle(at: t), forKeyPath: "transform.rotation.z")
         } else {
             rotor.setValue(-spin.angle(at: rampEnd), forKeyPath: "transform.rotation.z")
+        }
+        if !parts.isEmpty {
+            let group = CAAnimationGroup()
+            group.animations = parts
+            group.duration = spin.targetVelocity > 0 ? .greatestFiniteMagnitude : rampEnd - t
+            group.beginTime = 0                      // = "nu", når transaktionen committes
+            group.isRemovedOnCompletion = true
+            group.preferredFrameRateRange = Self.smoothRange
+            rotor.add(group, forKey: "spin")
         }
 
         // Resten: tætte samples gennem overgangene, derefter glisne samples af armens langsomme vej ind over pladen.
@@ -260,7 +306,7 @@ final class TurntableLayer {
         applyNonRotor(armPoses.last ?? now)
 
         // Armen bevæger sig langsomt over pladen: lav billedrate er nok (en hel overgang styres af de korte animationer).
-        let armRange = sparse.isEmpty ? Self.smoothRange : CAFrameRateRange(minimum: 10, maximum: 60, preferred: 30)
+        let armRange = Self.smoothRange   // samme billedrate som de korte animationer (N2: ingen særbehandling)
         keyframes(armRot, "transform.rotation.z", armTimes, armPoses.map { -$0.armAngle }, key: "arm", range: armRange)
         keyframes(shadowRot, "transform.rotation.z", armTimes, armPoses.map { -$0.armAngle }, key: "arm", range: armRange)
         keyframes(armImage, "transform.scale", dense, densePoses.map { armScale($0.armLift) }, key: "lift")
@@ -286,7 +332,7 @@ final class TurntableLayer {
     /// Tilføjer en keyframe-animation hvis værdierne faktisk ændrer sig.
     @discardableResult
     private func keyframes(_ layer: CALayer, _ keyPath: String, _ times: [Double], _ values: [Any], key: String,
-                           fillMode: CAMediaTimingFillMode = .backwards, removedOnCompletion: Bool = true,
+                           fillMode: CAMediaTimingFillMode = .removed, removedOnCompletion: Bool = true,
                            range: CAFrameRateRange = TurntableLayer.smoothRange) -> CAKeyframeAnimation? {
         guard times.count >= 2, values.count == times.count, let first = times.first, let last = times.last, last > first else { return nil }
         // NB: [Double] kan bridges til [NSNumber] (= NSValue), så tal tjekkes først og punkter kun hvis det ikke er tal.
@@ -299,7 +345,9 @@ final class TurntableLayer {
         anim.values = values
         anim.keyTimes = times.map { NSNumber(value: ($0 - first) / (last - first)) }
         anim.duration = last - first
-        anim.beginTime = layer.convertTime(first, from: nil)
+        // QA N2: start "nu" ved commit (beginTime 0) i stedet for en absolut tid, og ingen .backwards-fyld:
+        // er animationen af en eller anden grund ikke aktiv, vises modelværdien = sluttilstanden (aldrig en gammel værdi).
+        anim.beginTime = 0
         anim.calculationMode = .linear
         anim.fillMode = fillMode
         anim.isRemovedOnCompletion = removedOnCompletion
@@ -342,6 +390,18 @@ final class TurntableLayer {
         ledGlow.setValue(1 - 0.5 * a, forKeyPath: "transform.scale")
         CATransaction.commit()
         dim = a
+    }
+
+    /// Kun test: efterligner fejlen QA så live – de korte overgange står fast på deres startværdi.
+    func debugFreezeTransitions() {
+        for l in allLayers {
+            for k in l.animationKeys() ?? [] where Self.transitionKeys.contains(k) {
+                guard let a = l.animation(forKey: k)?.copy() as? CAAnimation else { continue }
+                a.beginTime = l.convertTime(CACurrentMediaTime(), from: nil) + 1000
+                a.fillMode = .backwards
+                l.add(a, forKey: k)
+            }
+        }
     }
 
     /// Til test: navngivne lag med animationer.
