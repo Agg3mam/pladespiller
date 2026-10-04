@@ -9,23 +9,55 @@ import ImageIO
 /// Originalen læses aldrig ind i fuld størrelse: ImageIO laver et thumbnail på højst 1024 px, som caches.
 enum WoodTexture {
     /// Foretrukne filnavne (uden filtype) – det første der findes bruges; ellers første billede i mappen.
-    static var preferredNames = ["dark_wood", "walnut", "valnoed", "wood", "trae"]
-    static let extensions = ["jpg", "jpeg", "png", "heic", "tif", "tiff", "webp"]
-    static let maxPixelSize = 1400
+    nonisolated static let preferredNames = ["dark_wood", "walnut", "valnoed", "wood", "trae"]
+    nonisolated static let extensions = ["jpg", "jpeg", "png", "heic", "tif", "tiff", "webp"]
+    nonisolated static let maxPixelSize = 1400
 
-    private static var loaded = false
-    private static var cached: CGImage?
+    enum State { case notLoaded, loading, ready(CGImage), missing }
+    private(set) static var state: State = .notLoaded
+    /// Tælles op når fotoet er klar, så kroppens billede i cachen tegnes om (indgår i cache-nøglen).
+    private(set) static var generation = 0
+    static let didLoad = Notification.Name("PladespillerWoodTextureDidLoad")
 
-    /// Fotoet nedskaleret og drejet så årerne løber vandret (på langs af kroppen). Nil hvis ingen fil findes.
-    static var image: CGImage? {
-        if !loaded {
-            loaded = true
-            if let url = findFile() { cached = load(url) }
+    /// QA N8: afkodningen sker i baggrunden. Kaldes tidligt (når pladespilleren oprettes); blokerer aldrig main thread.
+    static func prewarm() {
+        guard case .notLoaded = state else { return }
+        state = .loading
+        DispatchQueue.global(qos: .userInitiated).async {
+            let img = findFile().flatMap(load)
+            let box = UncheckedBox(img)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    state = box.value.map(State.ready) ?? .missing
+                    generation += 1
+                    NotificationCenter.default.post(name: didLoad, object: nil)
+                }
+            }
         }
-        return cached
     }
 
-    static func findFile() -> URL? {
+    /// Kun snapshots/test: indlæs med det samme.
+    static func loadSynchronously() {
+        if case .ready = state { return }
+        state = findFile().flatMap(load).map(State.ready) ?? .missing
+        generation += 1
+    }
+
+    /// Fotoet nedskaleret og drejet så årerne løber vandret. Nil mens det indlæses, eller hvis ingen fil findes.
+    static var image: CGImage? {
+        if case .ready(let img) = state { return img }
+        return nil
+    }
+
+    /// Indlæses stadig (så tegnes en neutral træfarve indtil videre i stedet for det tegnede reservetræ).
+    static var isPending: Bool {
+        switch state {
+        case .notLoaded, .loading: true
+        default: false
+        }
+    }
+
+    nonisolated static func findFile() -> URL? {
         var dirs: [URL] = []
         if let r = Bundle.main.resourceURL { dirs.append(r.appendingPathComponent("Textures")) }
         if let env = ProcessInfo.processInfo.environment["PLADESPILLER_RESOURCES"] {
@@ -53,7 +85,7 @@ enum WoodTexture {
         return nil
     }
 
-    static func load(_ url: URL) -> CGImage? {
+    nonisolated static func load(_ url: URL) -> CGImage? {
         guard let src = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) else { return nil }
         let opts: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
@@ -66,7 +98,7 @@ enum WoodTexture {
     }
 
     /// Årer giver stor variation på tværs af åren og lille langs den. Måles på en lille gråtonekopi.
-    static func grainRunsVertically(_ img: CGImage) -> Bool {
+    nonisolated static func grainRunsVertically(_ img: CGImage) -> Bool {
         let n = 96
         var px = [UInt8](repeating: 0, count: n * n)
         let ok = px.withUnsafeMutableBytes { raw -> Bool in
@@ -88,9 +120,9 @@ enum WoodTexture {
         return gx > gy   // stor vandret variation → årerne går lodret
     }
 
-    static func rotated90(_ img: CGImage) -> CGImage? {
+    nonisolated static func rotated90(_ img: CGImage) -> CGImage? {
         let w = img.height, h = img.width
-        guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: Drawing.colorSpace,
+        guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return img }
         ctx.translateBy(x: CGFloat(w), y: 0)
         ctx.rotate(by: .pi / 2)
@@ -116,4 +148,10 @@ enum WoodTexture {
             PlinthRenderer.drawUpright(ctx, piece, in: CGRect(origin: .zero, size: size))
         }
     }
+}
+
+/// Flytter et CGImage over en tråd-grænse (billedet er uforanderligt).
+struct UncheckedBox<T>: @unchecked Sendable {
+    let value: T
+    init(_ value: T) { self.value = value }
 }

@@ -91,7 +91,41 @@ final class TurntableNSView: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        layer?.addSublayer(turntable.root)
+        layer?.addSublayer(turntable.container)   // N1: hele træet inkl. dæmpningslaget (samme som snapshots)
+        WoodTexture.prewarm()
+        NotificationCenter.default.addObserver(self, selector: #selector(woodLoaded), name: WoodTexture.didLoad, object: nil)
+        // N13: panelet bliver aldrig key, så cursor styres med et tracking area der altid er aktivt.
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.cursorUpdate, .mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                       owner: self, userInfo: nil))
+    }
+
+    @objc private func woodLoaded() { rebuild() }
+
+    /// Kun test (LiveSequenceTest): efterlign QA-fejlen N2.
+    var debugFreezeAfterSync = false
+
+    /// Sikkerhedsnet (QA N2): sæt sluttilstanden når overgangene er færdige. Én planlagt opgave ad gangen.
+    private var settleWork: DispatchWorkItem?
+    private func scheduleSettle(after delay: Double) {
+        settleWork?.cancel()
+        guard delay > 0 else { return }
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, let animator = self.animator, self.visible else { return }
+                self.turntable.settle(animator, at: CACurrentMediaTime())
+            }
+        }
+        settleWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay + 0.15, execute: work)
+    }
+
+    override func cursorUpdate(with event: NSEvent) { updateCursor(event) }
+    override func mouseMoved(with event: NSEvent) { updateCursor(event) }
+    override func mouseExited(with event: NSEvent) { NSCursor.arrow.set() }
+
+    private func updateCursor(_ event: NSEvent) {
+        let over = target(at: convert(event.locationInWindow, from: nil)) != nil
+        (over ? NSCursor.pointingHand : NSCursor.arrow).set()
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -147,13 +181,6 @@ final class TurntableNSView: NSView {
         }
     }
 
-    override func resetCursorRects() {
-        // Lille hjælp: håndcursor over pladen viser at den kan klikkes.
-        guard let g = geometry else { return }
-        let r = g.recordRadius
-        addCursorRect(NSRect(x: g.center.x - r, y: bounds.height - g.center.y - r, width: r * 2, height: r * 2), cursor: .pointingHand)
-    }
-
     // MARK: Dæmpning
 
     private var dimTarget: Double = -1
@@ -191,12 +218,18 @@ final class TurntableNSView: NSView {
 
     private func resync(at t: Double = CACurrentMediaTime()) {
         guard let animator else { return }
-        if visible { turntable.sync(animator, at: t) } else { turntable.apply(animator.pose(at: t)) }
+        if visible {
+            turntable.sync(animator, at: t)
+            if debugFreezeAfterSync { turntable.debugFreezeTransitions() }
+            scheduleSettle(after: animator.transitionsEnd(after: t) - t)
+        } else {
+            turntable.applyFinal(animator, at: t)
+        }
     }
 
     override func layout() {
         super.layout()
-        turntable.root.position = .zero
+        turntable.container.position = .zero
     }
 
     override func viewDidChangeBackingProperties() {
@@ -222,6 +255,6 @@ final class TurntableNSView: NSView {
         let nowVisible = window?.occlusionState.contains(.visible) ?? false
         guard nowVisible != visible else { return }
         visible = nowVisible
-        if visible { resync() } else { turntable.stopAnimations() }
+        if visible { resync() } else if let animator { turntable.applyFinal(animator, at: CACurrentMediaTime()) }
     }
 }

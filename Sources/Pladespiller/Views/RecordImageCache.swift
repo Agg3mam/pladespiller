@@ -59,7 +59,7 @@ enum TurntableImages {
     }
 
     static func plinth(_ g: TurntableGeometry, _ style: TurntableStyle, _ scale: CGFloat) -> CGImage? {
-        shared.image(key("plinth|\(style)", g, scale)) { PlinthRenderer.image(g, style: style, scale: scale) }
+        shared.image(key("plinth|\(style)|træ\(WoodTexture.generation)", g, scale)) { PlinthRenderer.image(g, style: style, scale: scale) }
     }
 
     static func record(_ g: TurntableGeometry, _ scale: CGFloat) -> CGImage? {

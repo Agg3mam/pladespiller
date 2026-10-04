@@ -38,6 +38,11 @@ enum SnapshotRenderer {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { UserDefaults.standard.removePersistentDomain(forName: defaultsSuite) }
         let started = Date()
+        WoodTexture.loadSynchronously()
+        let live = LiveSequenceTest.run(dir: dir)
+        try? live.joined(separator: "\n").write(to: dir.appendingPathComponent("live-tjek.txt"), atomically: true, encoding: .utf8)
+        print(live.joined(separator: "\n"))
+        if ProcessInfo.processInfo.environment["PLADESPILLER_SNAPSHOT_ONLY_LIVE"] == "1" { return }
         woodCloseUp(dir)
         if ProcessInfo.processInfo.environment["PLADESPILLER_SNAPSHOT_ONLY_WOOD"] == "1" { return }
         let music = NowPlaying.BundleID.music
@@ -337,6 +342,7 @@ extension SnapshotRenderer {
         // Ny størrelse (ikke i cachen) for at måle hvad det koster at tegne alle billeder første gang.
         let fresh = TurntableGeometry(size: CGSize(width: 149, height: 149), cornerRadius: 20)
         let t0 = Date()
+        WoodTexture.loadSynchronously()
         layer.configure(fresh, style: TurntableStyle.make(theme: .wood, artwork: nil), scale: 2)
         let buildMs = Date().timeIntervalSince(t0) * 1000
         let t1 = Date()

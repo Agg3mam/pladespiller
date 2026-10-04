@@ -103,7 +103,13 @@ enum PlinthRenderer {
         let k = Float(148 / h)   // tekstur i samme tæthed som på lille størrelse
         switch m {
         case .wood(let species):
-            if species == .walnut, let photo = WoodTexture.fitted(size: size, scale: scale) { return photo }
+            if species == .walnut {
+                if let photo = WoodTexture.fitted(size: size, scale: scale) { return photo }
+                if WoodTexture.isPending {
+                    // Fotoet afkodes i baggrunden: kort tid en rolig, mørk træfarve (tegnes om når fotoet er klar).
+                    return Drawing.pixels(size: CGSize(width: 4, height: 4), scale: 1) { _, _ in SIMD4(0.30, 0.16, 0.09, 1) }
+                }
+            }
             let veneer = WoodVeneer(species: species)
             return Drawing.pixels(size: size, scale: scale) { x, y in
                 let c = veneer.color(x * k, y * k)
