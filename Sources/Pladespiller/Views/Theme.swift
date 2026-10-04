@@ -234,22 +234,11 @@ enum PlinthRenderer {
                          from: CGPoint(x: q.x - postR * 0.4, y: q.y - postR * 0.4), to: CGPoint(x: q.x + postR * 0.4, y: q.y + postR * 0.4))
         }
 
-        // 33/45-knapper og LED-fatning
-        let bR = g.speedButtonRadius
-        for (i, c) in g.speedButtons.enumerated() {
-            ctx.saveGState()
-            shadowAt(0, h * 0.004, blur: h * 0.008, shadow)
-            ctx.addPath(Drawing.circle(c, bR)); ctx.setFillColor(Drawing.gray(0.3)); ctx.fillPath()
-            ctx.restoreGState()
-            Drawing.fill(ctx, Drawing.circle(c, bR),
-                         i == 0 ? Drawing.gradient([(0, Drawing.gray(0.92)), (1, Drawing.gray(0.62))])
-                                : Drawing.gradient([(0, Drawing.gray(0.80)), (1, Drawing.gray(0.50))]),
-                         from: CGPoint(x: c.x, y: c.y - bR), to: CGPoint(x: c.x, y: c.y + bR))
-            if h >= 120 {
-                let text = i == 0 ? "33" : "45"
-                drawText(ctx, text, at: c, size: bR * 0.95, color: NSColor(white: 0.18, alpha: 1), weight: .semibold)
-            }
+        // 33/45-knapperne er egne lag (de kan trykkes ned) – her kun en lille fordybning i kroppen under dem.
+        for c in g.speedButtons {
+            ctx.addPath(Drawing.circle(c, g.speedButtonRadius * 1.12)); ctx.setFillColor(Drawing.gray(0, 0.28)); ctx.fillPath()
         }
+        // LED-fatning
         let led = g.ledCenter, lr = g.ledRadius
         ctx.addPath(Drawing.circle(led, lr * 1.6)); ctx.setFillColor(Drawing.gray(0, 0.35)); ctx.fillPath()
         Drawing.fill(ctx, Drawing.circle(led, lr),
@@ -326,5 +315,50 @@ struct WoodVeneer {
         // knastkerner
         c = mix(c, late * 0.55, min(1, knotCore * 1.2))
         return c
+    }
+}
+
+
+/// 33/45-knap set ovenfra: hævet (inaktiv) eller trykket ned med lysende tal (aktiv).
+enum SpeedButtonRenderer {
+    static func image(_ g: TurntableGeometry, label: String, active: Bool, scale: CGFloat) -> CGImage? {
+        let r = g.speedButtonRadius, side = r * 3
+        let c = CGPoint(x: side / 2, y: side / 2)
+        let h = g.h
+        return Drawing.image(size: CGSize(width: side, height: side), scale: scale) { ctx in
+            if !active {
+                ctx.saveGState()
+                ctx.setShadow(offset: CGSize(width: 0, height: -h * 0.005 * scale), blur: h * 0.009 * scale, color: Drawing.gray(0, 0.5))
+                ctx.addPath(Drawing.circle(c, r)); ctx.setFillColor(Drawing.gray(0.4)); ctx.fillPath()
+                ctx.restoreGState()
+            }
+            let grad = active
+                ? Drawing.gradient([(0, Drawing.gray(0.48)), (1, Drawing.gray(0.70))])     // trykket ned: lys nederst
+                : Drawing.gradient([(0, Drawing.gray(0.95)), (1, Drawing.gray(0.64))])     // hævet: lys øverst
+            Drawing.fill(ctx, Drawing.circle(c, r), grad, from: CGPoint(x: c.x, y: c.y - r), to: CGPoint(x: c.x, y: c.y + r))
+            if active {
+                // indre skygge langs overkanten
+                ctx.saveGState()
+                ctx.addPath(Drawing.circle(c, r)); ctx.clip()
+                ctx.drawRadialGradient(Drawing.gradient([(0, Drawing.gray(0, 0)), (0.7, Drawing.gray(0, 0)), (1, Drawing.gray(0, 0.35))]),
+                                       startCenter: CGPoint(x: c.x, y: c.y + r * 0.15), startRadius: 0,
+                                       endCenter: CGPoint(x: c.x, y: c.y + r * 0.15), endRadius: r * 1.1, options: [])
+                ctx.restoreGState()
+            }
+            ctx.addPath(Drawing.circle(c, r - 0.25)); ctx.setStrokeColor(Drawing.gray(0, 0.35)); ctx.setLineWidth(0.5); ctx.strokePath()
+            if h >= 110 {
+                if active {
+                    // lysende tal: en svag glød bag cifrene
+                    ctx.saveGState()
+                    ctx.setShadow(offset: .zero, blur: r * 0.25 * scale, color: Drawing.color(1.0, 0.45, 0.15, 0.55))
+                    PlinthRenderer.drawText(ctx, label, at: c, size: r * 0.95, color: NSColor(srgbRed: 1.0, green: 0.50, blue: 0.20, alpha: 1), weight: .heavy)
+                    ctx.restoreGState()
+                }
+                let color = active ? NSColor(srgbRed: 1.0, green: 0.55, blue: 0.25, alpha: 1) : NSColor(white: 0.20, alpha: 1)
+                PlinthRenderer.drawText(ctx, label, at: c, size: r * 0.95, color: color, weight: .bold)
+            } else if active {
+                ctx.addPath(Drawing.circle(c, r * 0.28)); ctx.setFillColor(Drawing.color(1.0, 0.42, 0.16)); ctx.fillPath()
+            }
+        }
     }
 }

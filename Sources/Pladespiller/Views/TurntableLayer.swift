@@ -15,6 +15,8 @@ final class TurntableLayer {
     private let root = CALayer()
     private let plinth = CALayer()
     private let plinthGray = CALayer()
+    private let speed33 = CALayer()
+    private let speed45 = CALayer()
     private let platter = CALayer()
     private let rotor = CALayer()
     private let record = CALayer()
@@ -37,7 +39,7 @@ final class TurntableLayer {
     private var woodGeneration = -1
 
     private var allLayers: [CALayer] {
-        [container, root, plinth, plinthGray, platter, rotor, record, labelLayer, labelGray, previousGroup,
+        [container, root, plinth, plinthGray, speed33, speed45, platter, rotor, record, labelLayer, labelGray, previousGroup,
          previousLabelLayer, previousLabelGray, sheen, ledGlow, shadowMove, shadowRot, shadowImage, armRot, armImage]
     }
 
@@ -55,6 +57,8 @@ final class TurntableLayer {
         root.addSublayer(plinth)
         root.addSublayer(plinthGray)
         plinthGray.opacity = 0
+        root.addSublayer(speed33)
+        root.addSublayer(speed45)
         root.addSublayer(platter)
         root.addSublayer(rotor)
         rotor.addSublayer(record)
@@ -133,6 +137,9 @@ final class TurntableLayer {
             sheen.frame = square(g.center, half: g.recordRadius)
             sheen.contents = TurntableImages.sheen(g, scale)
 
+            speed33.frame = square(g.speedButtons[0], half: g.speedButtonRadius * 1.5)
+            speed45.frame = square(g.speedButtons[1], half: g.speedButtonRadius * 1.5)
+            speedState = nil
             ledGlow.frame = square(g.ledCenter, half: g.ledRadius * 4)
             ledGlow.contents = TurntableImages.ledGlow(g, scale)
 
@@ -165,8 +172,27 @@ final class TurntableLayer {
     private func shadowScale(_ lift: Double) -> Double { 1 + 0.05 * lift }
     private func rootOpacity(_ idle: Double) -> Double { 1 - 0.22 * idle }
 
+    private var speedState: Bool?
+
+    /// 33/45: den aktive knap er trykket ned og har lysende tal. Skift tones over på 0,15 s.
+    private func setSpeedButtons(_ fortyFive: Bool, animated: Bool) {
+        guard let g = geometry, speedState != fortyFive else { return }
+        let first = speedState == nil
+        speedState = fortyFive
+        if animated && !first {
+            let fade = CATransition()
+            fade.type = .fade
+            fade.duration = 0.15
+            speed33.add(fade, forKey: "press")
+            speed45.add(fade, forKey: "press")
+        }
+        speed33.contents = TurntableImages.speedButton(g, "33", active: !fortyFive, scale)
+        speed45.contents = TurntableImages.speedButton(g, "45", active: fortyFive, scale)
+    }
+
     private func setLabels(_ pose: TurntablePose) {
         guard let g = geometry else { return }
+        setSpeedButtons(pose.fortyFive, animated: true)
         labelLayer.contents = TurntableImages.label(pose.label, g, scale)
         labelGray.contents = TurntableImages.grayLabel(pose.label, g, scale)
         if let prev = pose.previousLabel {
@@ -237,7 +263,7 @@ final class TurntableLayer {
     func stopAnimations() {
         // Dæmpning og kroppens overtoning hører ikke til bevægelsen og må gerne løbe færdig.
         for l in allLayers {
-            for k in l.animationKeys() ?? [] where k != "dim" && k != "plinthFade" { l.removeAnimation(forKey: k) }
+            for k in l.animationKeys() ?? [] where k != "dim" && k != "plinthFade" && k != "press" { l.removeAnimation(forKey: k) }
         }
     }
 
@@ -273,7 +299,7 @@ final class TurntableLayer {
             let cruise = CABasicAnimation(keyPath: "transform.rotation.z")
             cruise.fromValue = -a
             cruise.toValue = -(a + 2 * .pi)
-            cruise.duration = WidgetMetrics.secondsPerRevolution
+            cruise.duration = 2 * .pi / spin.targetVelocity      // valgt fart (settings.spinSpeed)
             cruise.repeatCount = .infinity
             cruise.beginTime = rampEnd - t          // relativt til gruppen
             parts.append(cruise)

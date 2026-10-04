@@ -23,15 +23,15 @@ struct MarqueeText: View {
     static let hold: Double = 3.0      // pause ved start
     static let fade: CGFloat = 12      // blød kant: til venstre uden for tekstkolonnen, til højre inden for
 
-    private var font: NSFont { .systemFont(ofSize: size, weight: .bold) }
+    private var font: NSFont { .systemFont(ofSize: size, weight: .semibold) }
     private var textWidth: CGFloat { ceil((text as NSString).size(withAttributes: [.font: font]).width) }
     private var lineHeight: CGFloat { ceil(font.ascender - font.descender + font.leading) }
 
     var body: some View {
         if style == .ellipsis {
-            Text(text).font(.system(size: size, weight: .bold)).lineLimit(2).truncationMode(.tail)
+            Text(text).font(.system(size: size, weight: .semibold)).lineLimit(2).truncationMode(.tail)
         } else if textWidth <= width {
-            Text(text).font(.system(size: size, weight: .bold)).lineLimit(1)
+            Text(text).font(.system(size: size, weight: .semibold)).lineLimit(1)
         } else if snapshot != nil || fixedPhase != nil {
             staticMarquee(phase: fixedPhase ?? 0)
         } else {
@@ -86,7 +86,7 @@ struct MarqueeStrip: Equatable {
 
     var image: CGImage? {
         Self.cache.image("\(text)|\(size)|\(dark)|\(scale)") {
-            let font = NSFont.systemFont(ofSize: size, weight: .bold)
+            let font = NSFont.systemFont(ofSize: size, weight: .semibold)
             let color = dark ? NSColor(white: 1, alpha: 0.92) : NSColor(white: 0, alpha: 0.88)
             let attr: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
             let w = ceil((text as NSString).size(withAttributes: attr).width)

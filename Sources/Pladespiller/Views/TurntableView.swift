@@ -23,16 +23,19 @@ extension EnvironmentValues {
 struct TurntableView: View {
     let size: CGSize
     var cornerRadius: CGFloat = 20
+    var deck: CGRect? = nil
     let theme: TurntableTheme
     let nowPlaying: NowPlaying?
     var dim: Double = 0
+    var speed: SpinSpeed = .calm
     var onArmClick: () -> Void = {}
     var onRecordClick: () -> Void = {}
+    var onSpeedClick: (SpinSpeed) -> Void = { _ in }
 
     @Environment(\.turntableSnapshot) private var snapshot
     @Environment(\.displayScale) private var displayScale
 
-    var geometry: TurntableGeometry { TurntableGeometry(size: size, cornerRadius: cornerRadius) }
+    var geometry: TurntableGeometry { TurntableGeometry(size: size, cornerRadius: cornerRadius, deck: deck) }
     var style: TurntableStyle { TurntableStyle.make(theme: theme, artwork: nowPlaying?.artwork) }
 
     var body: some View {
@@ -43,8 +46,8 @@ struct TurntableView: View {
                         .resizable()
                 }
             } else {
-                LiveTurntable(geometry: geometry, style: style, nowPlaying: nowPlaying, dim: dim,
-                              onArmClick: onArmClick, onRecordClick: onRecordClick)
+                LiveTurntable(geometry: geometry, style: style, nowPlaying: nowPlaying, dim: dim, speed: speed,
+                              onArmClick: onArmClick, onRecordClick: onRecordClick, onSpeedClick: onSpeedClick)
             }
         }
         .frame(width: size.width, height: size.height)
@@ -65,15 +68,19 @@ private struct LiveTurntable: NSViewRepresentable {
     let style: TurntableStyle
     let nowPlaying: NowPlaying?
     let dim: Double
+    let speed: SpinSpeed
     let onArmClick: () -> Void
     let onRecordClick: () -> Void
+    let onSpeedClick: (SpinSpeed) -> Void
 
     func makeNSView(context: Context) -> TurntableNSView { TurntableNSView() }
 
     func updateNSView(_ view: TurntableNSView, context: Context) {
         view.onArmClick = onArmClick
         view.onRecordClick = onRecordClick
+        view.onSpeedClick = onSpeedClick
         view.configure(geometry: geometry, style: style)
+        view.setSpeed(speed)
         view.update(nowPlaying)
         view.setDim(dim)
     }
@@ -132,6 +139,7 @@ final class TurntableNSView: NSView {
 
     var onArmClick: () -> Void = {}
     var onRecordClick: () -> Void = {}
+    var onSpeedClick: (SpinSpeed) -> Void = { _ in }
 
     // MARK: Klik
     //
@@ -139,12 +147,17 @@ final class TurntableNSView: NSView {
     // Træk længere end 4 pt overtages af panelet, som afslutter med et mouseUp langt uden for vinduet –
     // så bliver et træk aldrig til et klik.
 
-    private enum Target { case arm, record }
+    private enum Target: Equatable { case arm, record, speed(SpinSpeed) }
     private var pressed: Target?
 
     private func target(at local: NSPoint) -> Target? {
         guard let g = geometry else { return nil }
         let p = CGPoint(x: local.x, y: bounds.height - local.y)          // y nedad som geometrien
+        // 33/45-knapperne: små, så klikfladen er mindst 14 pt i diameter.
+        let hitR = max(g.speedButtonRadius, 7)
+        for (i, c) in g.speedButtons.enumerated() where hypot(p.x - c.x, p.y - c.y) <= hitR {
+            return .speed(i == 0 ? .rpm33 : .rpm45)
+        }
         // Armen (ved sin vinkel lige nu)
         let a = turntable.visibleArmAngle()
         let dx = p.x - g.pivot.x, dy = p.y - g.pivot.y
@@ -178,6 +191,7 @@ final class TurntableNSView: NSView {
         switch pressed {
         case .arm: onArmClick()
         case .record: onRecordClick()
+        case .speed(let s): onSpeedClick(s)
         }
     }
 
@@ -206,6 +220,14 @@ final class TurntableNSView: NSView {
         guard let geometry, let style else { return }
         turntable.configure(geometry, style: style, scale: scale)
         resync()
+    }
+
+    /// Hastighed fra indstillingerne. Ændres den mens der spilles, speeder pladen blødt op/ned.
+    func setSpeed(_ speed: SpinSpeed) {
+        guard let geometry else { return }
+        if animator == nil { animator = TurntableAnimator(geometry: geometry) }
+        let t = CACurrentMediaTime()
+        if animator!.setSpeed(speed, at: t) { resync(at: t) }
     }
 
     func update(_ np: NowPlaying?) {

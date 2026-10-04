@@ -21,6 +21,10 @@ enum SnapshotRenderer {
         var problem: SourceAccessProblem? = nil
         /// Baggrund: neutral flade (som widgettens uigennemsigtige flade) eller "skrivebord" med dæmpet, gennemsigtig flade.
         var desktop = false
+        var large: LargeLayout = .classic
+        var speed: SpinSpeed = .calm
+        /// Kun layout-tjek: tegn kun dette element på gennemsigtig baggrund.
+        var probe: String? = nil
         var caption: String = ""
     }
 
@@ -39,12 +43,19 @@ enum SnapshotRenderer {
         defer { UserDefaults.standard.removePersistentDomain(forName: defaultsSuite) }
         let started = Date()
         WoodTexture.loadSynchronously()
+        let env = ProcessInfo.processInfo.environment
+        if env["PLADESPILLER_SNAPSHOT_LAYOUT"] == "1" {        // hurtig gentagelse af layoutarbejdet
+            layoutCheck(dir); largeProposals(dir); beforeAfter(dir); return
+        }
         let live = LiveSequenceTest.run(dir: dir)
         try? live.joined(separator: "\n").write(to: dir.appendingPathComponent("live-tjek.txt"), atomically: true, encoding: .utf8)
         print(live.joined(separator: "\n"))
         if ProcessInfo.processInfo.environment["PLADESPILLER_SNAPSHOT_ONLY_LIVE"] == "1" { return }
         woodCloseUp(dir)
         if ProcessInfo.processInfo.environment["PLADESPILLER_SNAPSHOT_ONLY_WOOD"] == "1" { return }
+        if ProcessInfo.processInfo.environment["PLADESPILLER_SNAPSHOT_LAYOUT"] == "1" {
+            layoutCheck(dir); largeProposals(dir); beforeAfter(dir); return
+        }
         let music = NowPlaying.BundleID.music
 
         // Basis: alle tre størrelser i standardtilstand.
@@ -52,6 +63,10 @@ enum SnapshotRenderer {
             write(scene(Scene(name: "widget-\(size.rawValue)", events: [(0, np(0, progress: 0.3, at: 0, app: music))], time: 4, size: size)),
                   to: dir.appendingPathComponent("widget-\(size.rawValue).png"))
         }
+
+        layoutCheck(dir)
+        largeProposals(dir)
+        beforeAfter(dir)
 
         // 1. Afspil: flere vinkler og fremdrifter
         let playing = [0.0, 0.25, 0.5, 0.75].map { dt in
@@ -129,7 +144,15 @@ enum SnapshotRenderer {
             Scene(name: "stor-spiller", events: [(0, np(1, progress: 0.42, at: 0, app: music))], time: 4, size: .large, caption: "stor, spiller"),
             Scene(name: "stor-pause-lys", events: [(0, np(0, playing: false, progress: 0.42, at: 0, app: music))], time: 4, size: .large, dark: false, caption: "stor, pause, lys"),
         ]
-        sheet("08-knapper-hover", buttons, dir: dir, columns: 3)
+        let speedScenes: [Scene] = [
+            Scene(name: "fart-33", events: [(0, np(0, progress: 0.3, at: 0, app: music))], time: 4, size: .small, speed: .rpm33,
+                  caption: "33 aktiv (33⅓ o/min)"),
+            Scene(name: "fart-45", events: [(0, np(0, progress: 0.3, at: 0, app: music))], time: 4, size: .small, speed: .rpm45,
+                  caption: "45 aktiv (45 o/min)"),
+            Scene(name: "fart-45-stor", events: [(0, np(1, progress: 0.3, at: 0, app: music))], time: 4, size: .large, speed: .rpm45,
+                  caption: "45 aktiv · stor"),
+        ]
+        sheet("08-knapper-hover", buttons + speedScenes, dir: dir, columns: 3)
 
         // 8. Dæmpet mod fuld farve (dæmpet flade er gennemsigtig over sløret skrivebord)
         var dimmed: [Scene] = []
@@ -158,6 +181,7 @@ enum SnapshotRenderer {
 
     static func pose(for s: Scene) -> TurntablePose {
         var a = TurntableAnimator(geometry: TurntableGeometry(size: CGSize(width: 148, height: 148), cornerRadius: 20))
+        a.setSpeed(s.speed, at: 0)
         for (t, n) in s.events where t <= s.time {
             a.update(n.map { TurntableInput($0, at: base.addingTimeInterval(t)) }, at: t)
         }
@@ -173,6 +197,7 @@ enum SnapshotRenderer {
         let settings = Settings(defaults: UserDefaults(suiteName: defaultsSuite)!)
         settings.size = s.size
         settings.theme = s.theme
+        settings.spinSpeed = s.speed
         let store = NowPlayingStore(sources: [FixedSource(current(for: s))])
         store.start()
         let presentation = WidgetPresentation()
@@ -184,7 +209,9 @@ enum SnapshotRenderer {
         return WidgetView()
             .frame(width: body.width, height: body.height)
             .background {
-                if s.desktop {
+                if s.probe != nil {
+                    Color.clear
+                } else if s.desktop {
                     // Som Vinduets dæmpede flade: baggrundens opacitet falder mod dimBackgroundOpacity.
                     WidgetBackground(scheme: scheme).opacity(1 - (1 - WidgetMetrics.dimBackgroundOpacity) * s.dim)
                 } else {
@@ -201,12 +228,14 @@ enum SnapshotRenderer {
             .environment(\.titleStyle, s.titleStyle)
             .environment(\.marqueePhase, s.marqueePhase)
             .environment(\.snapshotAccessProblem, s.problem)
+            .environment(\.largeLayout, s.large)
+            .environment(\.layoutProbe, s.probe)
             .environment(\.colorScheme, scheme)
             .environment(\.displayScale, 2)
     }
 
     /// Kontaktark: flere scener i et gitter med billedtekst.
-    static func sheet(_ name: String, _ scenes: [Scene], dir: URL, columns: Int) {
+    static func sheet(_ name: String, _ scenes: [Scene], dir: URL, columns: Int, scale: CGFloat = 2) {
         let rows = stride(from: 0, to: scenes.count, by: columns).map { Array(scenes[$0..<min($0 + columns, scenes.count)]) }
         let view = VStack(alignment: .leading, spacing: 14) {
             ForEach(rows.indices, id: \.self) { r in
@@ -225,7 +254,7 @@ enum SnapshotRenderer {
         }
         .padding(16)
         .background(Color(white: 0.30))
-        write(view, to: dir.appendingPathComponent("\(name).png"))
+        write(view, to: dir.appendingPathComponent("\(name).png"), scale: scale)
     }
 
     static func write(_ view: some View, to url: URL, scale: CGFloat = 2) {
@@ -255,6 +284,11 @@ enum SnapshotRenderer {
             (4.0, np(0, playing: false, progress: 0.21, at: 4.0)),    // pause fra fuld fart
             (6.0, nil),
         ]
+        // Hastighedsskift mens der spilles (som en rigtig pladespiller der skifter 33 → 45): 45 ved 2,6 s,
+        // 'Langsom' ved 2,9 s (midt i den rampe), 'Rolig' igen ved 3,5 s.
+        a.setSpeed(.calm, at: 0)
+        let speedEvents: [(Double, SpinSpeed)] = [(2.6, .rpm45), (2.9, .slow), (3.5, .calm)]
+        var si = 0
         var lines = ["# t (s)\tvinkel (grader)\thastighed (o/min)\tΔvinkel/Δt (o/min)"]
         var prevAngle: Double?, prevV: Double?
         var maxVJump = 0.0, maxMismatch = 0.0
@@ -262,6 +296,11 @@ enum SnapshotRenderer {
         let dt = 0.02
         var t = 0.0
         while t <= 7.5 + 1e-9 {
+            while si < speedEvents.count, speedEvents[si].0 <= t + 1e-9 {
+                a.setSpeed(speedEvents[si].1, at: speedEvents[si].0)
+                lines.append("# hastighed t=\(speedEvents[si].0): \(speedEvents[si].1.title)")
+                si += 1
+            }
             while ei < events.count, events[ei].0 <= t + 1e-9 {
                 a.update(events[ei].1.map { TurntableInput($0, at: base.addingTimeInterval(events[ei].0)) }, at: events[ei].0)
                 lines.append("# hændelse t=\(events[ei].0): \(events[ei].1.map { $0.isPlaying ? "afspil" : "pause" } ?? "intet")")
@@ -281,8 +320,8 @@ enum SnapshotRenderer {
             prevAngle = ang; prevV = rpm
             t += dt
         }
-        let summary = String(format: "Største hastighedsspring mellem to samples (20 ms): %.2f o/min (fuld fart = 33,33). "
-                             + "Største afvigelse mellem Δvinkel/Δt og hastighed: %.3f o/min.", maxVJump, maxMismatch)
+        let summary = String(format: "Største hastighedsspring mellem to samples (20 ms): %.2f o/min (fuld fart = %.2f). "
+                             + "Største afvigelse mellem Δvinkel/Δt og hastighed: %.3f o/min.", maxVJump, 60 / WidgetMetrics.secondsPerRevolution, maxMismatch)
         lines.insert("# " + summary, at: 0)
         try? lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
         print(summary)
@@ -319,7 +358,7 @@ enum SnapshotRenderer {
 extension SnapshotRenderer {
     /// Nærbillede af træet: den store krop (foto + lys, lak, kant) i 4× skala, et udsnit, og det tegnede reservetræ.
     static func woodCloseUp(_ dir: URL) {
-        let g = TurntableGeometry(size: CGSize(width: 328, height: WidgetView.largeTurntableHeight), cornerRadius: 20)
+        let g = TurntableGeometry(size: CGSize(width: 328, height: WidgetView.largeClassicDeckHeight), cornerRadius: 20)
         let style = TurntableStyle(plinth: .wood(.walnut), darkHardware: false)
         print(WoodTexture.findFile().map { "Træfoto: \($0.path)" } ?? "Intet træfoto fundet – bruger tegnet træ")
         func save(_ img: CGImage?, _ name: String) {
@@ -384,6 +423,191 @@ extension SnapshotRenderer {
         lines.append("Rulletekst pause: animationer = \(mq.debugAnimationKeys)")
         try? lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
         print(lines.joined(separator: "\n"))
+    }
+}
+
+extension SnapshotRenderer {
+    // MARK: Layout-tjek (målt i pixels)
+
+    /// Tegner kun ét element (probe) på gennemsigtig baggrund @4x og finder dets synlige kanter (blæk), i punkter.
+    static func inkRect(_ s: Scene) -> CGRect? {
+        let scale: CGFloat = 4
+        let renderer = ImageRenderer(content: scene(s).environment(\.displayScale, scale))
+        renderer.scale = scale
+        guard let img = renderer.cgImage, let data = img.dataProvider?.data, let p = CFDataGetBytePtr(data) else { return nil }
+        let bpr = img.bytesPerRow, bpp = img.bitsPerPixel / 8
+        let alphaIndex: Int = {
+            switch img.alphaInfo {
+            case .premultipliedFirst, .first, .noneSkipFirst: return 0
+            default: return bpp - 1
+            }
+        }()
+        var minX = Int.max, minY = Int.max, maxX = -1, maxY = -1
+        for y in 0..<img.height {
+            for x in 0..<img.width where p[y * bpr + x * bpp + alphaIndex] > 8 {
+                minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y)
+            }
+        }
+        guard maxX >= 0 else { return nil }
+        return CGRect(x: CGFloat(minX) / scale, y: CGFloat(minY) / scale,
+                      width: CGFloat(maxX - minX + 1) / scale, height: CGFloat(maxY - minY + 1) / scale)
+    }
+
+    static func layoutCheck(_ dir: URL) {
+        // Titel med flade versaler, så blækkets overkant = versalhøjden.
+        var track = np(0, progress: 0.35, at: 0, app: NowPlaying.BundleID.music)
+        track.title = "HEJ VERDEN"
+        var lines: [String] = ["Layout-tjek (målt på synligt blæk @4x, punkter fra widgettens øverste venstre hjørne)",
+                               "Tolerance: 0,5 pt", ""]
+        var failures = 0
+        func check(_ label: String, _ value: CGFloat?, _ expected: CGFloat) {
+            guard let value else { lines.append("  ?  \(label): ikke fundet"); failures += 1; return }
+            let ok = abs(value - expected) <= 0.5
+            if !ok { failures += 1 }
+            lines.append(String(format: "  %@ %@: %.2f (forventet %.2f, afvigelse %+.2f)", ok ? "OK" : "FEJL", label, value, expected, value - expected))
+        }
+        for (size, large) in [(WidgetSize.small, LargeLayout.classic), (.medium, .classic), (.large, .classic),
+                              (.large, .wood), (.large, .centered), (.large, .cropped)] {
+            let base = Scene(name: "probe", events: [(0, track)], time: 4, size: size, large: large)
+            func r(_ name: String) -> CGRect? { var s = base; s.probe = name; return inkRect(s) }
+            let body = WidgetMetrics.bodySize(for: size)
+            lines.append("\(size.title)\(size == .large ? " · " + large.title : "") (\(Int(body.width))×\(Int(body.height))):")
+            let krop = r("krop")
+            if let k = krop { lines.append(String(format: "     krop: x %.2f–%.2f, y %.2f–%.2f", k.minX, k.maxX, k.minY, k.maxY)) }
+            switch (size, large) {
+            case (.small, _):
+                check("krop venstre", krop?.minX, Layout.objectInset)
+                check("krop top", krop?.minY, Layout.objectInset)
+                check("krop højre", krop?.maxX, body.width - Layout.objectInset)
+                check("krop bund", krop?.maxY, body.height - Layout.objectInset)
+                let g = TurntableGeometry(size: CGSize(width: 148, height: 148), cornerRadius: Layout.objectRadius)
+                check("pladens centrum (lodret) = kroppens midte", g.center.y, 74)
+                check("luft armbase → højre kant = luft LED → bund (gitter)", g.deck.maxX - (g.pivot.x + g.basePlateRadius),
+                      g.deck.maxY - (g.ledCenter.y + g.speedButtonRadius))
+            case (.medium, _):
+                let col = WidgetView.mediumColumn(body)
+                check("krop venstre", krop?.minX, Layout.objectInset)
+                check("krop top", krop?.minY, Layout.objectInset)
+                check("krop bund", krop?.maxY, body.height - Layout.objectInset)
+                check("titel versaltop = krop top + 8", r("titel")?.minY, Layout.padding)
+                check("titel venstre = kolonne", r("titel")?.minX, col.x)
+                check("kildeikon venstre = kolonne", r("ikon")?.minX, col.x)
+                check("forrige (blæk) venstre = kolonne", r("forrige")?.minX, col.x)
+                check("fremdrift venstre = kolonne", r("fremdrift")?.minX, col.x)
+                check("fremdrift højre = 16 pt fra kant", r("fremdrift")?.maxX, body.width - Layout.padding)
+                check("næste (blæk) højre = 16 pt fra kant", r("næste")?.maxX, body.width - Layout.padding)
+                check("afspil bund = krop bund − 8", r("afspil")?.maxY, body.height - Layout.padding)
+                if let a = r("afspil"), let f = r("forrige"), let n = r("næste") {
+                    check("forrige lodret midte = afspil midte", f.midY, a.midY)
+                    check("næste lodret midte = afspil midte", n.midY, a.midY)
+                    check("afspil vandret midte = kolonnens midte", a.midX, col.x + col.width / 2)
+                }
+            case (.large, .classic):
+                check("krop venstre", krop?.minX, Layout.objectInset)
+                check("krop top", krop?.minY, Layout.objectInset)
+                check("krop højre", krop?.maxX, body.width - Layout.objectInset)
+                let kb = (krop?.maxY ?? 0)
+                check("titel versaltop = krop bund + 12", r("titel")?.minY, kb + Layout.gap)
+                check("titel venstre = 16", r("titel")?.minX, Layout.padding)
+                check("kildeikon venstre = 16", r("ikon")?.minX, Layout.padding)
+                // Tider flugter med deres ramme (typografisk), så linjen ikke hopper når cifrene skifter hvert sekund.
+                check("tid (start) ramme venstre = 16", r("tid-start#ramme")?.minX, Layout.padding)
+                check("tid (slut) ramme højre = 16 fra kant", r("tid-slut#ramme")?.maxX, body.width - Layout.padding)
+                check("afspil bund = 16 fra kant", r("afspil")?.maxY, body.height - Layout.padding)
+                check("afspil vandret midte = widgettens midte", r("afspil")?.midX, body.width / 2)
+            case (.large, .wood):
+                check("infobjælke venstre = 8", r("panel")?.minX, Layout.objectInset)
+                check("infobjælke bund = 8 fra kant", r("panel")?.maxY, body.height - Layout.objectInset)
+                check("titel venstre = 16", r("titel")?.minX, Layout.padding)
+                check("titel versaltop = infobjælke top + 8", r("titel")?.minY, (r("panel")?.minY ?? 0) + Layout.objectInset)
+                check("afspil bund = 16 fra kant", r("afspil")?.maxY, body.height - Layout.padding)
+                check("afspil vandret midte = widgettens midte", r("afspil")?.midX, body.width / 2)
+            case (.large, .centered):
+                check("krop top = 16", krop?.minY, Layout.padding)
+                check("krop vandret midte = widgettens midte", krop?.midX, body.width / 2)
+                check("titel vandret midte = widgettens midte", r("titel")?.midX, body.width / 2)
+                check("afspil vandret midte = widgettens midte", r("afspil")?.midX, body.width / 2)
+                check("afspil bund = 16 fra kant", r("afspil")?.maxY, body.height - Layout.padding)
+            case (.large, .cropped):
+                let col = WidgetView.croppedColumn
+                check("krop top = 8", krop?.minY, Layout.objectInset)
+                check("krop bund = 8 fra kant", krop?.maxY, body.height - Layout.objectInset)
+                check("krop højre + 12 = kolonne", (krop?.maxX ?? 0) + Layout.gap, col.x)
+                check("titel versaltop = 16 (= krop top + 8)", r("titel")?.minY, Layout.padding)
+                check("cover (ramme) venstre = kolonne", r("cover#ramme")?.minX, col.x)
+                check("cover (ramme) højre = 16 fra kant", r("cover#ramme")?.maxX, body.width - Layout.padding)
+                check("titel venstre = kolonne", r("titel")?.minX, col.x)
+                check("kildeikon venstre = kolonne", r("ikon")?.minX, col.x)
+                check("tid (start) ramme venstre = kolonne", r("tid-start#ramme")?.minX, col.x)
+                check("tid (slut) ramme højre = 16 fra kant", r("tid-slut#ramme")?.maxX, body.width - Layout.padding)
+                check("forrige (blæk) venstre = kolonne", r("forrige")?.minX, col.x)
+                check("næste (blæk) højre = 16 fra kant", r("næste")?.maxX, body.width - Layout.padding)
+                check("afspil bund = 16 fra kant (= krop bund − 8)", r("afspil")?.maxY, body.height - Layout.padding)
+            default: break
+            }
+            lines.append("")
+        }
+        lines.insert(failures == 0 ? "ALT FLUGTER (inden for 0,5 pt)" : "\(failures) AFVIGELSER", at: 0)
+        try? lines.joined(separator: "\n").write(to: dir.appendingPathComponent("layout-tjek.txt"), atomically: true, encoding: .utf8)
+        print(lines.joined(separator: "\n"))
+    }
+
+    // MARK: Forslag til Stor
+
+    static func largeProposals(_ dir: URL) {
+        var scenes: [Scene] = []
+        let music = NowPlaying.BundleID.music
+        for large in LargeLayout.allCases {
+            for (theme, dark) in [(TurntableTheme.wood, true), (.wood, false), (.auto, true), (.auto, false)] {
+                scenes.append(Scene(name: "stor-\(large.rawValue)", events: [(0, np(theme == .auto ? 1 : 0, progress: 0.42, at: 0, app: music))],
+                                    time: 4, size: .large, theme: theme, dark: dark, large: large,
+                                    caption: "\(large.title) · \(theme.title) · \(dark ? "mørk" : "lys")"))
+            }
+        }
+        sheet("stor-forslag", scenes, dir: dir, columns: 4, scale: 3)
+    }
+
+    // MARK: Før/efter for Mellem og Lille
+
+    static func beforeAfter(_ dir: URL) {
+        let music = NowPlaying.BundleID.music
+        let after: [Scene] = [
+            Scene(name: "efter-mellem", events: [(0, np(0, progress: 0.35, at: 0, app: music))], time: 4, caption: "EFTER · Mellem"),
+            Scene(name: "efter-mellem-lys", events: [(0, np(1, playing: false, progress: 0.35, at: 0, app: music))], time: 4, dark: false,
+                  caption: "EFTER · Mellem, pause, lys"),
+            Scene(name: "efter-lille", events: [(0, np(0, progress: 0.35, at: 0, app: music))], time: 4, size: .small, hover: true,
+                  caption: "EFTER · Lille, mus over"),
+        ]
+        var befores: [(String, NSImage)] = []
+        if let dirPath = ProcessInfo.processInfo.environment["PLADESPILLER_BEFORE_DIR"] {
+            for (file, caption) in [("widget-medium.png", "FØR · Mellem"), ("widget-small.png", "FØR · Lille")] {
+                if let img = NSImage(contentsOf: URL(fileURLWithPath: dirPath).appendingPathComponent(file)) { befores.append((caption, img)) }
+            }
+        }
+        let view = VStack(alignment: .leading, spacing: 18) {
+            if !befores.isEmpty {
+                HStack(alignment: .top, spacing: 14) {
+                    ForEach(befores.indices, id: \.self) { i in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Image(nsImage: befores[i].1).resizable().interpolation(.high)
+                                .frame(width: befores[i].1.size.width / 2, height: befores[i].1.size.height / 2)
+                            Text(befores[i].0).font(.system(size: 11, weight: .medium)).foregroundStyle(Color(white: 0.85))
+                        }
+                    }
+                }
+            }
+            HStack(alignment: .top, spacing: 14) {
+                ForEach(after.indices, id: \.self) { i in
+                    VStack(alignment: .leading, spacing: 4) {
+                        scene(after[i])
+                        Text(after[i].caption).font(.system(size: 11, weight: .medium)).foregroundStyle(Color(white: 0.85))
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(Color(white: 0.30))
+        write(view, to: dir.appendingPathComponent("polish-foer-efter.png"), scale: 3)
     }
 }
 

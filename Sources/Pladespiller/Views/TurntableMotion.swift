@@ -12,7 +12,9 @@ import Foundation
 /// Pladens rotation. Hastigheden easer (smoothstep) mellem to værdier; vinklen er integralet,
 /// så både vinkel og hastighed er kontinuerte – også når man skifter mål midt i en op/nedbremsning.
 struct SpinMotion: Equatable {
-    static let cruise = 2 * Double.pi / WidgetMetrics.secondsPerRevolution   // rad/s
+    /// Reference-fart (standard) til at skalere rampernes længde. Den faktiske fart vælges i indstillingerne.
+    static let referenceCruise = 2 * Double.pi / WidgetMetrics.secondsPerRevolution   // rad/s
+    static func cruise(secondsPerRevolution s: Double) -> Double { 2 * Double.pi / s }
 
     private(set) var t0: Double = 0
     private(set) var a0: Double = 0
@@ -52,7 +54,9 @@ struct SpinMotion: Equatable {
         a0 = a.truncatingRemainder(dividingBy: 2 * .pi)
         v0 = cv
         v1 = v
-        duration = base * abs(v - cv) / Self.cruise
+        // Fuld op/ned fra stilstand som før; skift mellem to farter (33 ↔ 45) mindst 0,5 s, så det ses som en blød overgang.
+        duration = base * abs(v - cv) / Self.referenceCruise
+        if cv > 0, v > 0 { duration = max(duration, 0.5) }
     }
 
     /// Stil direkte (uden rampe), fx første gang.
@@ -112,6 +116,7 @@ struct TurntablePose: Equatable {
     var previousLabelOpacity: Double = 0
     var led: Double = 0              // 0...1
     var idle: Double = 1             // 1 = intet spiller (dæmpet)
+    var fortyFive = false            // 45-knappen trykket ned (ellers 33)
 }
 
 /// Tilstandsmaskinen. Ren Swift uden Core Animation, så den kan testes og tegnes til et givet tidspunkt.
@@ -132,6 +137,22 @@ struct TurntableAnimator {
     private var previousLabel: LabelContent?
     private var labelFade = Fade(0)
 
+    /// Valgt fart (rad/s) mens der spilles – fra `settings.spinSpeed`.
+    private(set) var cruiseVelocity = SpinMotion.referenceCruise
+    /// Hvilken af kroppens hastighedsknapper der er trykket ned.
+    private(set) var fortyFive = false
+
+    /// Ny hastighed fra indstillingerne. Spiller pladen, speeder den blødt op/ned (samme rampe, kontinuert vinkel og fart).
+    @discardableResult
+    mutating func setSpeed(_ speed: SpinSpeed, at t: Double) -> Bool {
+        let v = SpinMotion.cruise(secondsPerRevolution: speed.secondsPerRevolution)
+        guard v != cruiseVelocity || speed.isFortyFive != fortyFive else { return false }
+        cruiseVelocity = v
+        fortyFive = speed.isFortyFive
+        if started, input?.isPlaying == true { spin.setTarget(v, at: t) }
+        return true
+    }
+
     private var led = Fade(0)
     private var idle = Fade(1)
     private var started = false
@@ -147,6 +168,7 @@ struct TurntableAnimator {
         copy.armTarget = armTarget; copy.armTransition = armTransition
         copy.label = label; copy.previousLabel = previousLabel; copy.labelFade = labelFade
         copy.led = led; copy.idle = idle; copy.started = started
+        copy.cruiseVelocity = cruiseVelocity; copy.fortyFive = fortyFive
         return copy
     }
 
@@ -194,7 +216,7 @@ struct TurntableAnimator {
         let playing = new?.isPlaying == true
         if !started {
             started = true
-            spin.jump(to: playing ? SpinMotion.cruise : 0, at: t)
+            spin.jump(to: playing ? cruiseVelocity : 0, at: t)
             armTarget = newArmTarget
             label = new?.label ?? .blank
             led = Fade(playing ? 1 : 0)
@@ -202,7 +224,7 @@ struct TurntableAnimator {
             return true
         }
 
-        spin.setTarget(playing ? SpinMotion.cruise : 0, at: t)
+        spin.setTarget(playing ? cruiseVelocity : 0, at: t)
         led.set(playing ? 1 : 0, at: t, duration: 0.3)
         idle.set(new == nil ? 1 : 0, at: t, duration: 0.5)
 
@@ -244,6 +266,7 @@ struct TurntableAnimator {
     func pose(at t: Double) -> TurntablePose {
         var p = TurntablePose()
         p.recordAngle = spin.angle(at: t)
+        p.fortyFive = fortyFive
         p.label = label
         let fade = labelFade.value(at: t)
         if fade > 0.001, let previousLabel { p.previousLabel = previousLabel; p.previousLabelOpacity = fade }
