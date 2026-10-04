@@ -22,9 +22,12 @@ Fortryder du en tilladelse, kan du ændre den i Systemindstillinger ▸ Anonymit
 - **Træk** widgetten for at flytte den. Den falder på plads i gitteret.
 - **Klik på armen:** afspil/pause. **Klik på pladen:** åbn musikappen.
 - **Knapperne** forrige, afspil/pause og næste findes i størrelserne Mellem og Stor.
+- **Spol:** klik eller træk på fremdriftslinjen (Mellem og Stor).
+- **Hastighed:** klik på 33 eller 45 på pladespilleren, eller vælg i menuen.
 - **Højreklik** åbner menuen:
   - Lille / Mellem / Stor
   - Tema: Træ, Aluminium, Sort eller Auto (farven hentes fra coveret)
+  - Hastighed: Langsom, Rolig, 33⅓ eller 45 o/min
   - Farver
   - Lås placering
   - Åbn ved login
