@@ -37,7 +37,7 @@ struct WidgetView: View {
 
     private func turntable(_ size: CGSize, radius: CGFloat = Layout.objectRadius, deck: CGRect? = nil) -> some View {
         TurntableView(size: size, cornerRadius: radius, deck: deck, theme: settings.theme, nowPlaying: np, dim: dim,
-                      speed: settings.spinSpeed,
+                      speed: settings.spinSpeed, scrubbing: ScrubState.shared.fraction != nil,
                       onArmClick: { store.playPause() }, onRecordClick: { store.openSourceApp() },
                       onSpeedClick: { settings.spinSpeed = $0 })
             .probe("krop")
@@ -52,7 +52,8 @@ struct WidgetView: View {
 
     private var actions: TrackActions {
         TrackActions(previous: { store.previousTrack() }, playPause: { store.playPause() }, next: { store.nextTrack() },
-                     openApp: { store.openSourceApp() }, openSettings: { store.openAutomationSettings() })
+                     openApp: { store.openSourceApp() }, openSettings: { store.openAutomationSettings() },
+                     seek: { store.seek(to: $0) })
     }
 
     /// Versalhøjden af titlen skal ligge præcis her (y fra widgettens top).
@@ -103,7 +104,7 @@ struct WidgetView: View {
                     TrackText(np: np, problem: problem, width: col.width, showAlbum: true, actions: actions)
                     Spacer(minLength: 0)
                     if let np {
-                        ProgressLine(np: np).probe("fremdrift")
+                        SeekBar(np: np, onSeek: actions.seek).probe("fremdrift")
                             .padding(.bottom, Layout.progressToButtons)
                         TransportRow(isPlaying: np.isPlaying, spread: true, actions: actions)
                     }
@@ -154,7 +155,7 @@ struct WidgetView: View {
                     if let np {
                         TrackText(np: np, problem: problem, width: inner, showAlbum: true, albumInline: true, actions: actions)
                         Spacer(minLength: 0)
-                        ProgressRow(np: np).padding(.bottom, Layout.progressToButtons)
+                        ProgressRow(np: np, onSeek: actions.seek).padding(.bottom, Layout.progressToButtons)
                         TransportRow(isPlaying: np.isPlaying, spread: false, actions: actions).frame(maxWidth: .infinity)
                     } else {
                         // Intet spiller: rolig, centreret i bjælken
@@ -200,6 +201,7 @@ struct TrackActions {
     var next: () -> Void
     var openApp: () -> Void
     var openSettings: () -> Void
+    var seek: (TimeInterval) -> Void
 }
 
 // MARK: - Tekst

@@ -130,7 +130,7 @@ struct TurntableAnimator {
     // Arm
     private enum ArmTarget: Equatable { case rest, groove }
     private var armTarget: ArmTarget = .rest
-    private var armTransition: (start: Double, duration: Double, fromAngle: Double, fromLift: Double, lift: Double)?
+    private var armTransition: (start: Double, duration: Double, fromAngle: Double, fromLift: Double, lift: Double, glide: Bool)?
 
     // Etiket
     private(set) var label: LabelContent = .blank
@@ -155,6 +155,9 @@ struct TurntableAnimator {
 
     private var led = Fade(0)
     private var idle = Fade(1)
+    /// Brugeren trækker på fremdriftslinjen: spring følges glidende og uden løft.
+    var scrubbing = false
+    static let glideDuration = 0.22
     private var started = false
 
     init(geometry: TurntableGeometry) {
@@ -198,15 +201,19 @@ struct TurntableAnimator {
         if started, old == nil, new == nil { return false }
         if started, let old, let new, old.trackKey == new.trackKey, old.isPlaying == new.isPlaying,
            old.duration == new.duration, old.label == new.label,
-           let exp = expectedPosition(at: t), abs(exp - new.position) < 1.0 {
-            return false   // samme tilstand, kun lidt drift
+           let exp = expectedPosition(at: t), abs(exp - new.position) < (scrubbing ? 0.2 : 1.0) {
+            return false   // samme tilstand, kun lidt drift (under scrub følges også små flyt)
         }
 
         let trackChanged = old?.trackKey != new?.trackKey
-        let seek: Bool = {
-            guard let old, let new, !trackChanged, old.isPlaying, new.isPlaying, let exp = expectedPosition(at: t) else { return false }
-            return abs(exp - new.position) >= 3.0
+        // Spring i sangen: stort (≥ 3 s, ikke under scrub) løfter armen kort; små spring og alt under scrub glider armen
+        // blødt hen uden løft, så den hverken hopper eller springer tilbage.
+        let jump: Double = {
+            guard let old, let new, !trackChanged, old.isPlaying, new.isPlaying, let exp = expectedPosition(at: t) else { return 0 }
+            return abs(exp - new.position)
         }()
+        let seek = jump >= 3.0 && !scrubbing
+        let glide = jump > 0 && !seek
         let newArmTarget: ArmTarget = (new?.isPlaying == true) ? .groove : .rest
         let currentPose = pose(at: t)
 
@@ -238,11 +245,14 @@ struct TurntableAnimator {
         }
 
         let armNeedsMove = newArmTarget != armTarget || (trackChanged && newArmTarget == .groove) || seek
-        if armNeedsMove {
+        if glide, !armNeedsMove {
+            // Glid fra den nuværende vinkel til den nye uden løft (løft fortsætter hvis en overgang var i gang).
+            armTransition = (t, Self.glideDuration, currentPose.armAngle, currentPose.armLift, 0, true)
+        } else if armNeedsMove {
             // Løft lidt ved pause/afspil, lidt mere ved ny sang.
             let lift: Double = trackChanged || seek ? 1.0 : 0.8
             let dur = seek ? D * 0.7 : D
-            armTransition = (t, dur, currentPose.armAngle, currentPose.armLift, lift)
+            armTransition = (t, dur, currentPose.armAngle, currentPose.armLift, lift, false)
         }
         armTarget = newArmTarget
         return true
@@ -276,6 +286,13 @@ struct TurntableAnimator {
         let target = armTargetAngle(at: t)
         if let tr = armTransition, t < tr.start + tr.duration {
             let s = (t - tr.start) / tr.duration
+            if tr.glide {
+                // Glid: armen flyttes straks og blødt; et evt. løft fra før sænkes samtidig.
+                let e = easeInOut(s)
+                p.armAngle = tr.fromAngle + (target - tr.fromAngle) * e
+                p.armLift = tr.fromLift * (1 - e)
+                return p
+            }
             // løft 0–28 %, flyt 22–78 %, sænk 72–100 %
             if s < 0.28 { p.armLift = tr.fromLift + (tr.lift - tr.fromLift) * easeInOut(s / 0.28) }
             else if s < 0.72 { p.armLift = tr.lift }
