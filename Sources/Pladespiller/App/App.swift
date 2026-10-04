@@ -33,13 +33,20 @@ enum PladespillerMain {
             exit(Int32(WindowSelfTest.run(outputDirectory: dir.map { URL(fileURLWithPath: $0) })))
         }
 
-        // Kun én kopi ad gangen.
-        let me = NSRunningApplication.current
-        if let id = Bundle.main.bundleIdentifier,
-           NSRunningApplication.runningApplications(withBundleIdentifier: id).contains(where: {
-               $0 != me && !$0.isTerminated && $0.processIdentifier < me.processIdentifier
-           }) {
-            exit(0)
+        // Kun én kopi ad gangen. Er en ældre kopi ved at lukke (fx under build.sh --install),
+        // venter vi op til 2 s på den i stedet for at lukke os selv.
+        if let id = Bundle.main.bundleIdentifier {
+            let me = NSRunningApplication.current
+            func olderCopies() -> [NSRunningApplication] {
+                NSRunningApplication.runningApplications(withBundleIdentifier: id).filter {
+                    $0 != me && !$0.isTerminated && $0.processIdentifier < me.processIdentifier
+                }
+            }
+            let deadline = Date.now.addingTimeInterval(2)
+            while !olderCopies().isEmpty, Date.now < deadline {
+                RunLoop.current.run(until: .now.addingTimeInterval(0.1))
+            }
+            if !olderCopies().isEmpty { exit(0) }
         }
 
         let app = NSApplication.shared
