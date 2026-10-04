@@ -82,3 +82,4 @@ En agent ændrer kun sine egne filer. Ændringer i fælles filer bestilles hos h
 - **2026-10-04 · Hastighed kan vælges:** `SpinSpeed` (Langsom 3 s / Rolig 2,25 s standard / 33⅓ 1,8 s / 45 1,33 s) i `Settings.spinSpeed`. Menu ▸ Hastighed (Vindue); rotation + 33/45-knapper på kroppen (Grafik).
 - **2026-10-04 · Polish flettet** (grafik 5c18b34, vindue 9b03c52): fast layoutgitter (`Views/Layout.swift`: padding 16, objectInset 8, gap 12), pixel-layouttjek, valgbar hastighed + 33/45-knapper, menu ▸ Hastighed. Stor har 4 varianter bag `LargeLayout` (classic standard, A helt træ, B centreret, C plade+cover) — afventer brugerens valg.
 - **2026-10-04 · Stor = A "Helt træ"** (brugerens valg; grafik cc88598). Øvrige varianter fjernet. Aktiv 33/45-knap lyser orange.
+- **2026-10-04 · Spoling:** `NowPlayingSource.seek(to:)` (standard no-op), `NowPlayingStore.seek(to:)`; mock implementerer. Musikdata: Spotify/Musik. Grafik: klik/træk på fremdriftslinjen.

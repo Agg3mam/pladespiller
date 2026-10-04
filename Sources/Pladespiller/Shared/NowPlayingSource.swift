@@ -22,4 +22,11 @@ protocol NowPlayingSource: AnyObject {
     func playPause()
     func nextTrack()
     func previousTrack()
+    /// Spol til en position i sangen (sekunder). Opdatér `current` optimistisk med det samme.
+    func seek(to position: TimeInterval)
+}
+
+extension NowPlayingSource {
+    /// Standard: kilden kan ikke spole (fx testkilder i snapshots). Rigtige kilder implementerer den.
+    func seek(to position: TimeInterval) {}
 }

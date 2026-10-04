@@ -35,6 +35,8 @@ final class NowPlayingStore {
     func playPause() { active?.playPause() }
     func nextTrack() { active?.nextTrack() }
     func previousTrack() { active?.previousTrack() }
+    /// Spol til en position (sekunder) i den viste sang.
+    func seek(to position: TimeInterval) { active?.seek(to: position) }
 
     /// Åbner Systemindstillinger ▸ Anonymitet og sikkerhed ▸ Automatisering (hvor man giver adgang til Spotify/Musik).
     func openAutomationSettings() {

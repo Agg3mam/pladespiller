@@ -57,6 +57,13 @@ final class MockNowPlayingSource: NowPlayingSource {
         set(np)
     }
 
+    func seek(to position: TimeInterval) {
+        guard var np = current else { return }
+        np.position = min(max(0, position), np.duration)
+        np.positionTimestamp = .now
+        set(np)
+    }
+
     func nextTrack() { jump(to: trackIndex + 1) }
     func previousTrack() { jump(to: trackIndex - 1) }
 
