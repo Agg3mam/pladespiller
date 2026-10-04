@@ -206,15 +206,30 @@ final class WidgetPanelController {
         }
 
         migrateLegacyLastScreen()
+        migratePlacementToTopLeft()
         applyAppearance()
         observeStyle()
         observeSize()
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.placeAfterScreenChange() }
+            MainActor.assumeIsolated {
+                self?.placeAfterScreenChange()
+                // Apple lægger sine widgets om efter et skærmskift – flugt igen bagefter.
+                self?.scheduleRealign(after: 2)
+            }
         }
         let ws = NSWorkspace.shared.notificationCenter
+        // Efter dvale, skærme der vågner og brugerskift tegner Apple sine widgets igen (QA N10).
+        for name in [NSWorkspace.didWakeNotification, NSWorkspace.screensDidWakeNotification,
+                     NSWorkspace.sessionDidBecomeActiveNotification] {
+            workspaceObservers.append(ws.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.scheduleRealign(after: 1)
+                    self?.scheduleRealign(after: 5)
+                }
+            })
+        }
         workspaceObservers.append(ws.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification,
                                                  object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.realignToAppleWidgets() }
@@ -228,11 +243,12 @@ final class WidgetPanelController {
     }
 
     func show() {
-        panel.setFrame(restoredFrame(size: panel.frame.size), display: false)
+        panel.setFrame(desiredFrame(size: WidgetMetrics.windowSize(for: settings.size)), display: false)
         panel.orderFrontRegardless()
         dimming.start()
-        // Ved login er Apples widgets måske ikke tegnet endnu (QA M7): ét engangstjek.
-        scheduleRealign(after: 3)
+        // Ved login er Apples widgets måske ikke tegnet endnu (QA M7/N10): en kort, endelig række
+        // engangstjek – ingen gentagen polling. Står vi allerede rigtigt, sker der intet.
+        for delay in [1.5, 4, 10, 30, 60] as [TimeInterval] { scheduleRealign(after: delay) }
     }
 
     // MARK: Flugt med Apple-widgets der dukker op senere (QA M7)
@@ -243,13 +259,11 @@ final class WidgetPanelController {
         }
     }
 
-    /// Snap igen mod Apples widgets, hvis de er dukket op og vi står skævt eller oven på dem.
+    /// Placér igen ud fra brugerens ønskede plads og Apples widgets som de står nu.
     /// Gemmer ikke: brugerens egen placering bevares til næste gendannelse.
     private func realignToAppleWidgets() {
         guard !panel.isDragging else { return }
-        let anchors = AppleWidgetWindows.frames()
-        guard !anchors.isEmpty else { return }
-        let target = snapped(panel.frame, anchors: anchors)
+        let target = desiredFrame(size: panel.frame.size)
         guard target != panel.frame else { return }
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = WidgetMetrics.snapDuration
@@ -288,15 +302,13 @@ final class WidgetPanelController {
         }
     }
 
-    /// Behold øverste venstre hjørne, ny størrelse, snap igen, gem.
+    /// Ny størrelse ud fra det samme øverste venstre hjørne (brugerens gemte plads), snap igen.
+    /// Gemmer ikke: måtte widgetten vige for en Apple-widget i den store størrelse, kommer den
+    /// tilbage på sin plads, når den bliver mindre igen (QA N15).
     private func sizeChanged() {
         let size = WidgetMetrics.windowSize(for: settings.size)
-        let old = panel.frame
-        guard old.size != size else { return }
-        let wanted = CGRect(x: old.minX, y: old.maxY - size.height, width: size.width, height: size.height)
-        let target = snapped(wanted)
-        panel.setFrame(target, display: true)
-        save(target)
+        guard panel.frame.size != size else { return }
+        panel.setFrame(desiredFrame(size: size), display: true)
     }
 
     // MARK: Træk
@@ -339,11 +351,40 @@ final class WidgetPanelController {
         return GridSnapper.snap(start, visibleFrame: visible, anchors: a, pitch: WidgetMetrics.gridPitch)
     }
 
+    /// Gemmer brugerens plads som **øverste venstre hjørne** (x, maxY i AppKit-koordinater), så den
+    /// gælder for alle størrelser (QA N15). Kun ved træk.
     private func save(_ frame: CGRect) {
         guard let screen = screen(for: frame) else { return }
         let id = screen.stableID
-        settings.saveOrigin(frame.origin, screenID: id)
+        settings.saveOrigin(CGPoint(x: frame.minX, y: frame.maxY), screenID: id)
         lastScreenID = id
+    }
+
+    /// Bølge 1/2 gemte nederste venstre hjørne. Omregn én gang til øverste venstre ud fra den
+    /// størrelse der var aktiv (størrelsesskift gemte dengang ny placering, så den passer).
+    private static let topLeftMarkerKey = "pladespiller.window.placementIsTopLeft"
+    private func migratePlacementToTopLeft() {
+        let d = UserDefaults.standard
+        guard !d.bool(forKey: Self.topLeftMarkerKey) else { return }
+        let h = WidgetMetrics.windowSize(for: settings.size).height
+        let prefix = Settings.Key.placement(screenID: "")
+        for key in d.dictionaryRepresentation().keys where key.hasPrefix(prefix) {
+            let id = String(key.dropFirst(prefix.count))
+            if let o = settings.savedOrigin(screenID: id) {
+                settings.saveOrigin(CGPoint(x: o.x, y: o.y + h), screenID: id)
+            }
+        }
+        d.set(true, forKey: Self.topLeftMarkerKey)
+    }
+
+    /// Hvor widgetten skal stå med `size`: på den sidst brugte skærm (eller en anden med gemt plads)
+    /// ud fra det gemte øverste venstre hjørne; er den sidste skærm væk, bliver den hvor den er.
+    private func desiredFrame(size: CGSize) -> CGRect {
+        if let last = lastScreenID, !NSScreen.screens.contains(where: { $0.stableID == last }) {
+            let f = panel.frame
+            return snapped(CGRect(x: f.minX, y: f.maxY - size.height, width: size.width, height: size.height))
+        }
+        return restoredFrame(size: size)
     }
 
     /// Gendan: sidste skærm hvis den er tilsluttet, ellers første skærm med en gemt placering,
@@ -355,8 +396,8 @@ final class WidgetPanelController {
             ordered.insert(ordered.remove(at: i), at: 0)
         }
         for screen in ordered {
-            if let o = settings.savedOrigin(screenID: screen.stableID) {
-                let saved = CGRect(origin: o, size: size)
+            if let topLeft = settings.savedOrigin(screenID: screen.stableID) {
+                let saved = CGRect(x: topLeft.x, y: topLeft.y - size.height, width: size.width, height: size.height)
                 let visible = screen.visibleFrame
                 let start = GridSnapper.clamp(saved, into: visible)
                 return GridSnapper.snap(start, visibleFrame: visible,
@@ -369,17 +410,11 @@ final class WidgetPanelController {
     }
 
     /// Skærm til/fra, opløsning, Dock eller menulinje ændret.
+    /// Kommer den sidst brugte skærm tilbage, går vi tilbage dertil; ellers bliver vi hvor vi er,
+    /// hvis det stadig er synligt, og flytter ellers til nærmeste synlige sted.
     private func placeAfterScreenChange() {
         guard !panel.isDragging else { return }
-        let size = panel.frame.size
-        // Kommer den sidst brugte skærm tilbage, går vi tilbage dertil.
-        let target: CGRect
-        if let last = lastScreenID, NSScreen.screens.contains(where: { $0.stableID == last }) {
-            target = restoredFrame(size: size)
-        } else {
-            // Ellers: bliv hvor vi er, hvis det stadig er synligt – ellers nærmeste synlige sted.
-            target = snapped(panel.frame)
-        }
+        let target = desiredFrame(size: panel.frame.size)
         if target != panel.frame { panel.setFrame(target, display: true) }
     }
 }
