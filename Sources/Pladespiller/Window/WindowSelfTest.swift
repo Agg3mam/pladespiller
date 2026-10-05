@@ -121,13 +121,14 @@ enum WindowSelfTest {
             let menu = builder.build()
             let titles = menu.items.map { $0.isSeparatorItem ? "—" : $0.title }
             print("     menu:", titles.joined(separator: " | "))
-            check("menupunkter", titles == ["Lille", "Mellem", "Stor", "—", "Tema", "Hastighed", "Farver", "—",
+            check("menupunkter", titles == ["Lille", "Mellem", "Stor", "—", "Tema", "Farve", "Hastighed", "Dæmpning", "—",
+                                            "Vis knapper og tekst", "Vis sangtekst", "Henter fra LRCLIB på nettet", "—",
                                             "Lås placering", "Åbn ved login", "—", "Fjern widget"], "\(titles)")
             check("flueben ved Stor", menu.item(withTitle: "Stor")?.state == .on && menu.item(withTitle: "Lille")?.state == .off)
             let tema = menu.item(withTitle: "Tema")?.submenu
-            check("Tema-undermenu", tema?.items.map(\.title) == ["Træ", "Aluminium", "Sort", "Auto"]
+            check("Tema-undermenu", tema?.items.map(\.title) == ["Flad", "Træ", "Aluminium", "Sort", "Auto"]
                   && tema?.item(withTitle: "Sort")?.state == .on)
-            check("Farver-undermenu", menu.item(withTitle: "Farver")?.submenu?.items.map(\.title)
+            check("Dæmpning-undermenu", menu.item(withTitle: "Dæmpning")?.submenu?.items.map(\.title)
                   == ["Automatisk", "Altid fuld farve", "Altid dæmpet"])
             // Vælg "Lille" og "Aluminium" via menuens egne handlinger.
             if let i = menu.item(withTitle: "Lille") , let a = i.action { _ = (i.target as? NSObject)?.perform(a, with: i) }
@@ -141,6 +142,41 @@ enum WindowSelfTest {
                 _ = (i.target as? NSObject)?.perform(a, with: i)
             }
             check("menuhandling sætter spinSpeed", settings.spinSpeed == .rpm45, "\(settings.spinSpeed)")
+
+            // Farve ▸ (temaet Flad).
+            let farve = menu.item(withTitle: "Farve")?.submenu
+            let farveTitles = farve?.items.map { $0.isSeparatorItem ? "—" : $0.title } ?? []
+            let fixed = FlatColor.allCases.filter { $0 != .auto && $0 != .custom }
+            check("Farve-undermenu", farveTitles == ["Auto (fra coveret)", "—"] + fixed.map(\.title) + ["—", "Vælg farve…"],
+                  "\(farveTitles)")
+            check("farveprikker på faste farver", fixed.allSatisfy { farve?.item(withTitle: $0.title)?.image?.size == NSSize(width: 12, height: 12) })
+            check("ingen flueben i Farve når tema ≠ Flad", farve?.items.allSatisfy { $0.state == .off } == true)
+            if let i = farve?.item(withTitle: FlatColor.teal.title), let a = i.action {
+                _ = (i.target as? NSObject)?.perform(a, with: i)
+            }
+            check("farvevalg sætter flatColor og skifter til Flad", settings.flatColor == .teal && settings.theme == .flat)
+            do {
+                let again = builder.build().item(withTitle: "Farve")?.submenu
+                check("flueben ved Turkis", again?.item(withTitle: FlatColor.teal.title)?.state == .on
+                      && again?.items.filter { $0.state == .on }.count == 1)
+            }
+            check("hex ud og ind", NSColor(hex: "1F9E95")?.srgbHex == "1F9E95" && NSColor(hex: "#f2b705")?.srgbHex == "F2B705")
+            settings.flatColor = .custom
+            settings.flatCustomHex = "123456"
+            check("prik i valgt farve ved Vælg farve…",
+                  builder.build().item(withTitle: "Farve")?.submenu?.item(withTitle: FlatColor.custom.title)?.image != nil)
+
+            // Afkrydsninger.
+            settings.showControls = false
+            settings.showLyrics = true
+            let m2 = builder.build()
+            check("flueben følger showControls/showLyrics",
+                  m2.item(withTitle: "Vis knapper og tekst")?.state == .off && m2.item(withTitle: "Vis sangtekst")?.state == .on)
+            check("LRCLIB-note er deaktiveret", m2.item(withTitle: "Henter fra LRCLIB på nettet")?.isEnabled == false)
+            for title in ["Vis knapper og tekst", "Vis sangtekst"] {
+                if let i = m2.item(withTitle: title), let a = i.action { _ = (i.target as? NSObject)?.perform(a, with: i) }
+            }
+            check("afkrydsninger skifter showControls/showLyrics", settings.showControls && !settings.showLyrics)
             withExtendedLifetime(builder) {}
             UserDefaults.standard.removePersistentDomain(forName: "pladespiller.selftest.menu")
         }

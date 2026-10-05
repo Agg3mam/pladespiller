@@ -36,6 +36,7 @@ final class WidgetMenu {
             theme.addItem(item(t.title, checked: settings.theme == t) { [settings] in settings.theme = t })
         }
         menu.addItem(submenu("Tema", theme))
+        menu.addItem(submenu("Farve", flatColorMenu()))
 
         let speed = NSMenu()
         for v in SpinSpeed.allCases {
@@ -47,7 +48,18 @@ final class WidgetMenu {
         for c in ColorMode.allCases {
             colors.addItem(item(c.title, checked: settings.colorMode == c) { [settings] in settings.colorMode = c })
         }
-        menu.addItem(submenu("Farver", colors))
+        menu.addItem(submenu("Dæmpning", colors))
+        menu.addItem(.separator())
+
+        menu.addItem(item("Vis knapper og tekst", checked: settings.showControls) { [settings] in
+            settings.showControls.toggle()
+        })
+        let lyrics = item("Vis sangtekst", checked: settings.showLyrics) { [settings] in
+            settings.showLyrics.toggle()
+        }
+        lyrics.toolTip = "Henter fra LRCLIB på nettet"
+        menu.addItem(lyrics)
+        menu.addItem(note("Henter fra LRCLIB på nettet"))
         menu.addItem(.separator())
 
         menu.addItem(item("Lås placering", checked: settings.positionLocked) { [settings] in
@@ -63,6 +75,61 @@ final class WidgetMenu {
             DispatchQueue.main.async { MainActor.assumeIsolated { RemoveWidget.confirmAndRemove() } }
         })
         return menu
+    }
+
+    /// Farve ▸ til temaet Flad. Altid aktiv: vælger man en farve, skifter temaet til Flad, så valget
+    /// ses med det samme (en grå menu ville kræve to skridt og skjule, hvorfor den er grå).
+    private func flatColorMenu() -> NSMenu {
+        let m = NSMenu()
+        m.autoenablesItems = false
+        let isFlat = settings.theme == .flat
+        for c in FlatColor.allCases {
+            if c == .custom || c == FlatColor.allCases.dropFirst().first { m.addItem(.separator()) }
+            let checked = isFlat && settings.flatColor == c
+            let i: NSMenuItem
+            if c == .custom {
+                i = item(c.title, checked: checked) { [settings] in
+                    DispatchQueue.main.async {
+                        MainActor.assumeIsolated { FlatColorPicker.shared.show(settings: settings) }
+                    }
+                }
+                if settings.flatColor == .custom { i.image = Self.swatch(hex: settings.flatCustomHex) }
+            } else {
+                i = item(c.title, checked: checked) { [settings] in
+                    settings.flatColor = c
+                    settings.theme = .flat
+                }
+                if let hex = c.hex { i.image = Self.swatch(hex: hex) }
+            }
+            m.addItem(i)
+        }
+        return m
+    }
+
+    /// Lille rund farveprik (12 pt) til menupunkter.
+    static func swatch(hex: String, diameter: CGFloat = 12) -> NSImage {
+        let color = NSColor(hex: hex) ?? .gray
+        return NSImage(size: NSSize(width: diameter, height: diameter), flipped: false) { r in
+            let path = NSBezierPath(ovalIn: r.insetBy(dx: 0.5, dy: 0.5))
+            color.setFill()
+            path.fill()
+            NSColor.black.withAlphaComponent(0.18).setStroke()
+            path.lineWidth = 0.5
+            path.stroke()
+            return true
+        }
+    }
+
+    /// Lille, grå forklaring under et punkt (deaktiveret menupunkt).
+    private func note(_ text: String) -> NSMenuItem {
+        let i = NSMenuItem(title: text, action: nil, keyEquivalent: "")
+        i.isEnabled = false
+        i.indentationLevel = 1
+        i.attributedTitle = NSAttributedString(string: text, attributes: [
+            .font: NSFont.menuFont(ofSize: NSFont.smallSystemFontSize),
+            .foregroundColor: NSColor.secondaryLabelColor,
+        ])
+        return i
     }
 
     private func item(_ title: String, checked: Bool, _ action: @escaping @MainActor () -> Void) -> NSMenuItem {
