@@ -16,10 +16,14 @@ struct WidgetView: View {
     var body: some View {
         let body = WidgetMetrics.bodySize(for: settings.size)
         Group {
+            // "Står alene" (standard): kun pladespilleren + hjørnet med sangtekst/titel – i alle temaer.
             switch settings.size {
-            case .small: small(body)
-            case .medium: medium(body)
-            case .large: large(body)
+            case .small:
+                if standalone || flat { standaloneSmall(body) } else { small(body) }
+            case .medium:
+                if standalone { standaloneMedium(body) } else if flat { flatMedium(body) } else { medium(body) }
+            case .large:
+                if standalone { standaloneLarge(body) } else { large(body) }
             }
         }
         .frame(width: body.width, height: body.height)
@@ -35,8 +39,17 @@ struct WidgetView: View {
     private var problem: SourceAccessProblem? { snapshotProblem ?? store.accessProblem }
     private var dim: Double { presentation.dimAmount }
 
+    private var standalone: Bool { !settings.showControls }
+    private var flat: Bool { settings.theme == .flat }
+    private var style: TurntableStyle {
+        TurntableStyle.make(theme: settings.theme, artwork: np?.artwork, flatColor: settings.flatColor, customHex: settings.flatCustomHex)
+    }
+    @Environment(\.snapshotLyrics) private var snapshotLyrics
+    private var lyrics: LyricsState { snapshotLyrics ?? store.lyrics }
+
     private func turntable(_ size: CGSize, radius: CGFloat = Layout.objectRadius, deck: CGRect? = nil) -> some View {
-        TurntableView(size: size, cornerRadius: radius, deck: deck, theme: settings.theme, nowPlaying: np, dim: dim,
+        TurntableView(size: size, cornerRadius: radius, deck: deck, theme: settings.theme,
+                      flatColor: settings.flatColor, flatCustomHex: settings.flatCustomHex, nowPlaying: np, dim: dim,
                       speed: settings.spinSpeed, scrubbing: ScrubState.shared.fraction != nil,
                       onArmClick: { store.playPause() }, onRecordClick: { store.openSourceApp() },
                       onSpeedClick: { settings.spinSpeed = $0 })
@@ -84,6 +97,105 @@ struct WidgetView: View {
                 .animation(.easeInOut(duration: 0.2), value: presentation.isHovering)
             }
             .padding(Layout.objectInset)
+    }
+
+    // MARK: Står alene: pladespilleren fylder hele widgetten; hjørnet viser sangtekst eller titel + kunstner
+
+    /// Dækket (plade + arm) når pladespilleren står alene. Pladen er HELT synlig: 16 pt til kanten foroven og til venstre
+    /// (Lille: lidt mindre, så der er plads til én tekstlinje forneden). Armen står til højre.
+    static func standaloneDeck(_ size: WidgetSize) -> CGRect {
+        let edge: CGFloat = 0.048, top: CGFloat = 0.128            // pladens yderkant i dækket (0,42 − 0,372 / 0,5 − 0,372)
+        switch size {
+        case .large:
+            let d: CGFloat = 330
+            return CGRect(x: Layout.padding - edge * d, y: Layout.padding - top * d, width: d, height: d)
+        case .medium:
+            let d = (WidgetMetrics.bodySize(for: .medium).height - Layout.padding * 2) / 0.744
+            return CGRect(x: Layout.padding - edge * d, y: Layout.padding - top * d, width: d, height: d)
+        case .small:
+            let d: CGFloat = 156
+            return CGRect(x: 2, y: -6, width: d, height: d)
+        }
+    }
+
+    /// Hjørnefeltet (x, bund, bredde) når pladespilleren står alene.
+    static func cornerRect(_ size: WidgetSize) -> (x: CGFloat, bottom: CGFloat, width: CGFloat) {
+        let body = WidgetMetrics.bodySize(for: size)
+        switch size {
+        case .large:
+            return (Layout.padding, body.height - Layout.padding, body.width - Layout.padding * 2)
+        case .medium:
+            // til højre for armens leje, nederst
+            let g = TurntableGeometry(size: body, cornerRadius: WidgetMetrics.cornerRadius, deck: standaloneDeck(.medium), flat: true)
+            let x = (g.pivot.x + g.flatRecessRadius + Layout.gap).rounded()
+            return (x, body.height - Layout.padding, body.width - Layout.padding - x)
+        case .small:
+            return (12, body.height - 12, body.width - 24)
+        }
+    }
+
+    private func standaloneBody(_ size: WidgetSize, _ body: CGSize, corner: CornerText.Size) -> some View {
+        let c = Self.cornerRect(size)
+        return ZStack(alignment: .topLeading) {
+            turntable(body, radius: WidgetMetrics.cornerRadius, deck: Self.standaloneDeck(size))
+            dimmed(
+                CornerText(np: np, lyrics: lyrics, showLyrics: settings.showLyrics, size: corner,
+                           colors: CornerColors.make(style), width: c.width)
+                    .frame(width: c.width, height: c.bottom, alignment: .bottomLeading)
+                    .offset(x: c.x)
+                    .allowsHitTesting(false)
+            )
+        }
+        .frame(width: body.width, height: body.height, alignment: .topLeading)
+        .overlay(alignment: .topLeading) {
+            if let problem {
+                StatusCapsule(text: problem.message, warning: true, action: actions.openSettings).padding(Layout.padding)
+            }
+        }
+    }
+
+    private func standaloneLarge(_ body: CGSize) -> some View { standaloneBody(.large, body, corner: .large) }
+    private func standaloneMedium(_ body: CGSize) -> some View { standaloneBody(.medium, body, corner: .medium) }
+
+    private func standaloneSmall(_ body: CGSize) -> some View {
+        standaloneBody(.small, body, corner: .small)
+            .overlay(alignment: .bottomTrailing) {
+                Group {
+                    if np == nil, problem == nil {
+                        StatusCapsule(text: "Intet spiller", warning: false)
+                    } else if problem == nil, presentation.isHovering, let np {
+                        HoverPlayButton(isPlaying: np.isPlaying, action: actions.playPause).transition(.opacity)
+                    }
+                }
+                .padding(10)
+                .animation(.easeInOut(duration: 0.2), value: presentation.isHovering)
+            }
+    }
+
+    // MARK: Flad med knapper (Mellem): kroppen fylder widgetten; kolonnen står direkte på kroppen
+
+    private func flatMedium(_ body: CGSize) -> some View {
+        let c = Self.cornerRect(.medium)
+        let colors = CornerColors.make(style)
+        return ZStack(alignment: .topLeading) {
+            turntable(body, radius: WidgetMetrics.cornerRadius, deck: Self.standaloneDeck(.medium))
+            dimmed(
+                VStack(alignment: .leading, spacing: 0) {
+                    TrackText(np: np, problem: problem, width: c.width, showAlbum: false, actions: actions)
+                    Spacer(minLength: 0)
+                    if let np {
+                        SeekBar(np: np, onSeek: actions.seek).probe("fremdrift").padding(.bottom, Layout.progressToButtons)
+                        TransportRow(isPlaying: np.isPlaying, spread: true, actions: actions)
+                    }
+                }
+                .padding(.top, titleTop(Layout.padding))
+                .padding(.bottom, Layout.padding)
+                .frame(width: c.width, height: body.height, alignment: .topLeading)
+                .environment(\.colorScheme, colors.lightBody ? .light : .dark)
+                .offset(x: c.x)
+            )
+        }
+        .frame(width: body.width, height: body.height, alignment: .topLeading)
     }
 
     // MARK: Mellem: krop til venstre; titel, kunstner, album, fremdrift og knapper i en kolonne på gitteret
@@ -421,6 +533,7 @@ enum TitleStyle: String, CaseIterable {
 private struct TitleStyleKey: EnvironmentKey { static let defaultValue: TitleStyle = .marquee }
 private struct MarqueePhaseKey: EnvironmentKey { static let defaultValue: Double? = nil }
 private struct SnapshotProblemKey: EnvironmentKey { static let defaultValue: SourceAccessProblem? = nil }
+private struct SnapshotLyricsKey: EnvironmentKey { static let defaultValue: LyricsState? = nil }
 private struct WindowIsVisibleKey: EnvironmentKey { static let defaultValue = true }
 
 extension EnvironmentValues {
@@ -433,6 +546,11 @@ extension EnvironmentValues {
     var windowIsVisible: Bool {
         get { self[WindowIsVisibleKey.self] }
         set { self[WindowIsVisibleKey.self] = newValue }
+    }
+    /// Kun snapshots: sangtekst-tilstand at vise.
+    var snapshotLyrics: LyricsState? {
+        get { self[SnapshotLyricsKey.self] }
+        set { self[SnapshotLyricsKey.self] = newValue }
     }
     /// Kun snapshots: et adgangsproblem at vise (butikken sætter det selv live).
     var snapshotAccessProblem: SourceAccessProblem? {

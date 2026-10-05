@@ -23,6 +23,13 @@ enum SnapshotRenderer {
         var desktop = false
         var speed: SpinSpeed = .calm
         var seekPreview: SeekPreview? = nil
+        // Flad tema og "står alene" (de ældre ark viser knap-layoutet, som før)
+        var flatColor: FlatColor = .yellow
+        var customHex: String = "F2B705"
+        var showControls = true
+        var showLyrics = true
+        var lyrics: LyricsState = .notFound
+        var lyricsTransition: Double? = nil
         /// Kun layout-tjek: tegn kun dette element på gennemsigtig baggrund.
         var probe: String? = nil
         var caption: String = ""
@@ -44,6 +51,9 @@ enum SnapshotRenderer {
         let started = Date()
         WoodTexture.loadSynchronously()
         let env = ProcessInfo.processInfo.environment
+        if env["PLADESPILLER_SNAPSHOT_FLAT"] == "1" {          // hurtig gentagelse af Flad-arbejdet
+            flatSheet(dir); lyricsAnim(dir); referenceCompare(dir); layoutCheck(dir); return
+        }
         if env["PLADESPILLER_SNAPSHOT_LAYOUT"] == "1" {        // hurtig gentagelse af layoutarbejdet
             layoutCheck(dir); largeFinal(dir); beforeAfter(dir); seekSheet(dir); scrubReport(dir); return
         }
@@ -64,6 +74,9 @@ enum SnapshotRenderer {
                   to: dir.appendingPathComponent("widget-\(size.rawValue).png"))
         }
 
+        flatSheet(dir)
+        lyricsAnim(dir)
+        referenceCompare(dir)
         layoutCheck(dir)
         largeFinal(dir)
         beforeAfter(dir)
@@ -200,6 +213,10 @@ enum SnapshotRenderer {
         settings.size = s.size
         settings.theme = s.theme
         settings.spinSpeed = s.speed
+        settings.flatColor = s.flatColor
+        settings.flatCustomHex = s.customHex
+        settings.showControls = s.showControls
+        settings.showLyrics = s.showLyrics
         let store = NowPlayingStore(sources: [FixedSource(current(for: s))])
         store.start()
         let presentation = WidgetPresentation()
@@ -232,6 +249,8 @@ enum SnapshotRenderer {
             .environment(\.snapshotAccessProblem, s.problem)
             .environment(\.layoutProbe, s.probe)
             .environment(\.seekPreview, s.seekPreview)
+            .environment(\.snapshotLyrics, s.lyrics)
+            .environment(\.lyricsTransition, s.lyricsTransition)
             .environment(\.colorScheme, scheme)
             .environment(\.displayScale, 2)
     }
@@ -523,10 +542,43 @@ extension SnapshotRenderer {
                 let massMid = ((g.center.x - g.platterRadius) + (g.pivot.x + g.basePlateRadius)) / 2
                 check("plade+arm vandret midte = widgettens midte", massMid, body.width / 2)
                 check("dæk lodret midte = midt i det synlige over bjælken", deck.midY, panel.minY / 2)
-            default: break
             }
             lines.append("")
         }
+        // Flad · står alene: hele pladen synlig, armens leje inde på kroppen, hjørneteksten på gitteret.
+        for size in WidgetSize.allCases {
+            let body = WidgetMetrics.bodySize(for: size)
+            let base = Scene(name: "probe", events: [(0, track)], time: 4, size: size, theme: .flat, showControls: false)
+            func r(_ name: String) -> CGRect? { var s = base; s.probe = name; return inkRect(s) }
+            lines.append("Flad · står alene · \(size.title):")
+            let k = r("krop")
+            check("krop fylder widgetten (venstre)", k?.minX, 0)
+            check("krop fylder widgetten (højre)", k?.maxX, body.width)
+            check("krop fylder widgetten (bund)", k?.maxY, body.height)
+            let deck = WidgetView.standaloneDeck(size)
+            let g = TurntableGeometry(size: body, cornerRadius: WidgetMetrics.cornerRadius, deck: deck, flat: true)
+            let rec = CGRect(x: g.center.x - g.recordRadius, y: g.center.y - g.recordRadius, width: g.recordRadius * 2, height: g.recordRadius * 2)
+            lines.append(String(format: "     plade: x %.2f–%.2f, y %.2f–%.2f", rec.minX, rec.maxX, rec.minY, rec.maxY))
+            if size == .small {
+                check("hele pladen synlig (venstre ≥ 8)", min(rec.minX, 8), 8)
+                check("hele pladen synlig (top ≥ 8)", min(rec.minY, 8), 8)
+            } else {
+                check("pladen 16 pt fra venstre kant", rec.minX, Layout.padding)
+                check("pladen 16 pt fra top", rec.minY, Layout.padding)
+            }
+            check("armens leje inde på kroppen (top ≥ luft)", min(g.pivot.y - abs(g.counterweightEnd) - g.counterweightRadius * 0.3, g.flatEdgeGap), g.flatEdgeGap)
+            check("fordybningen inde på kroppen (højre ≤ bredde − luft)", max(g.pivot.x + g.flatRecessRadius, body.width - g.flatEdgeGap), body.width - g.flatEdgeGap)
+            if size != .small {
+                let c = WidgetView.cornerRect(size)
+                check("titel venstre = hjørnefelt", r("titel")?.minX, c.x)
+                check("kunstner (ramme) bund = 16 fra kant", r("kunstner#ramme")?.maxY, c.bottom)
+                if size == .large, let t = r("titel") {
+                    check("ingen overlap: titel under pladen (luft ≥ 12)", min(t.minY - rec.maxY, Layout.gap), Layout.gap)
+                }
+            }
+            lines.append("")
+        }
+
         // Spoling: hover/thumb og træk må ikke flytte noget.
         lines.append("Spoling: samme placering med og uden hover/træk (thumb vist):")
         for size in [WidgetSize.medium, .large] {
@@ -685,6 +737,127 @@ extension SnapshotRenderer {
         .padding(16)
         .background(Color(white: 0.30))
         write(view, to: dir.appendingPathComponent("polish-foer-efter.png"), scale: 3)
+    }
+}
+
+extension SnapshotRenderer {
+    // MARK: Flad tema og sangtekst
+
+    /// Egen testtekst (opdigtet) til testsang 0 med ord-timing. Positionen ved fremdrift 0,35 = 83,3 s.
+    static func sampleLyrics(word: Bool = true) -> LyricsState {
+        let key = np(0, progress: 0, at: 0, app: NowPlaying.BundleID.music).trackKey
+        let raw: [(Double, String)] = [
+            (56, "Lygterne tænder én for én"), (62, "over brostenene i regnen"), (68, ""),
+            (78, "Natten over Nørrebro"), (84, "synger stille med på vores sang"),
+            (90, "og byen holder vejret til det lysner over tagene"), (97, "Natten over Nørrebro"),
+        ]
+        var lines: [Lyrics.Line] = []
+        for (i, (t, text)) in raw.enumerated() {
+            let end = i + 1 < raw.count ? raw[i + 1].0 - 0.6 : t + 5
+            let parts = text.split(separator: " ").map(String.init)
+            let words: [Lyrics.Word] = word && !parts.isEmpty
+                ? parts.enumerated().map { Lyrics.Word(start: t + (end - t) * Double($0.offset) / Double(parts.count), text: $0.element) }
+                : []
+            lines.append(Lyrics.Line(start: t, text: text, words: words))
+        }
+        return .found(Lyrics(trackKey: key, lines: lines))
+    }
+
+    static func flatSheet(_ dir: URL) {
+        let music = NowPlaying.BundleID.music
+        let a = np(0, progress: 0.35, at: 0, app: music)                  // 83,3 s: linjen "Natten over Nørrebro", 3. ord
+        let b = np(1, progress: 0.35, at: 0, app: music)
+        let lyr = sampleLyrics()
+        var scenes: [Scene] = []
+        let colors: [(FlatColor, String, NowPlaying)] = [(.yellow, "Gul", a), (.auto, "Auto", b), (.black, "Sort", a), (.white, "Hvid", a),
+                                                         (.custom, "Mørkeblå (egen)", b)]
+        for size in [WidgetSize.large, .medium, .small] {
+            for (c, name, track) in colors {
+                scenes.append(Scene(name: "flad-\(size.rawValue)-\(c.rawValue)", events: [(0, track)], time: 4, size: size, theme: .flat,
+                                    dark: c != .white, flatColor: c, customHex: "1E3A5F", showControls: false,
+                                    lyrics: track.trackKey == a.trackKey ? lyr : .notFound,
+                                    caption: "\(size.title) · \(name)\(track.trackKey == a.trackKey ? " · sangtekst" : " · titel/kunstner")"))
+            }
+        }
+        // Tilstande
+        let problem = SourceAccessProblem(bundleID: NowPlaying.BundleID.spotify, message: "Ingen adgang til Spotify · Åbn Indstillinger")
+        scenes += [
+            Scene(name: "flad-pause", events: [(0, np(0, playing: false, progress: 0.35, at: 0, app: music))], time: 4, size: .large,
+                  theme: .flat, showControls: false, lyrics: lyr, caption: "Stor · pause (tekst står stille, dæmpet)"),
+            Scene(name: "flad-intet", events: [(0, nil)], time: 4, size: .large, theme: .flat, showControls: false, caption: "Stor · intet spiller"),
+            Scene(name: "flad-uden-cover", events: [(0, np(2, progress: 0.2, at: 0, app: music))], time: 4, size: .large, theme: .flat,
+                  flatColor: .auto, showControls: false, caption: "Stor · uden cover (Auto → neutral)"),
+            Scene(name: "flad-daempet", events: [(0, a)], time: 4, size: .large, theme: .flat, dim: 1, desktop: true, showControls: false,
+                  lyrics: lyr, caption: "Stor · dæmpet"),
+            Scene(name: "flad-mellem-intet", events: [(0, nil)], time: 4, size: .medium, theme: .flat, showControls: false,
+                  caption: "Mellem · intet spiller"),
+            Scene(name: "flad-adgang", events: [(0, nil)], time: 4, size: .medium, theme: .flat, problem: problem, showControls: false,
+                  caption: "Mellem · manglende adgang"),
+            Scene(name: "flad-mellem-knapper", events: [(0, a)], time: 4, theme: .flat, showControls: true,
+                  caption: "Mellem · knapper til · mørk"),
+            Scene(name: "flad-mellem-knapper-lys", events: [(0, b)], time: 4, theme: .flat, dark: false, flatColor: .auto, showControls: true,
+                  caption: "Mellem · knapper til · Auto · lys"),
+            Scene(name: "flad-stor-knapper", events: [(0, a)], time: 4, size: .large, theme: .flat, showControls: true,
+                  caption: "Stor · knapper til · mørk"),
+            Scene(name: "flad-stor-knapper-lys", events: [(0, a)], time: 4, size: .large, theme: .flat, dark: false, showControls: true,
+                  caption: "Stor · knapper til · lys"),
+            Scene(name: "flad-lille-hover", events: [(0, a)], time: 4, size: .small, theme: .flat, hover: true, showControls: false,
+                  lyrics: lyr, caption: "Lille · mus over"),
+            Scene(name: "trae-alene", events: [(0, a)], time: 4, size: .large, theme: .wood, showControls: false, lyrics: lyr,
+                  caption: "Træ · står alene"),
+            Scene(name: "alu-alene", events: [(0, b)], time: 4, size: .medium, theme: .aluminium, showControls: false,
+                  caption: "Aluminium · står alene"),
+        ]
+        sheet("flad", scenes, dir: dir, columns: 5, scale: 2)
+        write(scene(Scene(name: "flad-stor-detalje", events: [(0, a)], time: 4, size: .large, theme: .flat, showControls: false, lyrics: lyr)),
+              to: dir.appendingPathComponent("flad-stor-detalje.png"), scale: 3)
+    }
+
+    /// Et linjeskift i sangteksten i fire trin (samme bevægelse som live: ny linje glider op og toner ind, gammel toner ud).
+    static func lyricsAnim(_ dir: URL) {
+        let at = np(0, progress: 84.05 / 238, at: 0, app: NowPlaying.BundleID.music)   // lige efter linjeskiftet kl. 84
+        var scenes: [Scene] = []
+        for (i, p) in [0.0, 0.3, 0.6, 1.0].enumerated() {
+            for size in [WidgetSize.large, .medium] {
+                scenes.append(Scene(name: "anim-\(i)-\(size.rawValue)", events: [(0, at)], time: 0.05, size: size, theme: .flat,
+                                    showControls: false, lyrics: sampleLyrics(), lyricsTransition: p < 1 ? p : nil,
+                                    caption: String(format: "%@ · trin %d (%.2f s)", size.title, i + 1, p * 0.35)))
+            }
+        }
+        sheet("lyrics-anim", scenes, dir: dir, columns: 2, scale: 2)
+    }
+
+    /// Referencen (beskåret: ingen Snapchat-UI, ingen profil) ved siden af vores Stor i Gul.
+    static func referenceCompare(_ dir: URL) {
+        let candidates = [ProcessInfo.processInfo.environment["PLADESPILLER_REFERENCE"],
+                          FileManager.default.currentDirectoryPath + "/design/reference.png",
+                          FileManager.default.currentDirectoryPath + "/../../Pladespiller/design/reference.png"].compactMap { $0 }
+        guard let path = candidates.first(where: { FileManager.default.fileExists(atPath: $0) }),
+              let ns = NSImage(contentsOfFile: path), let cg = Drawing.cgImage(ns) else {
+            print("Referencebilledet blev ikke fundet (sæt PLADESPILLER_REFERENCE)"); return
+        }
+        // Kortet går fra y≈138 til ≈1618 (af 2000) i 923 px bredde; skær toppen væk under navn/avatar.
+        let sy = CGFloat(cg.height) / 2000, sx = CGFloat(cg.width) / 923
+        guard let crop = cg.cropping(to: CGRect(x: 0, y: 262 * sy, width: 923 * sx, height: (1618 - 262) * sy)) else { return }
+        let a = np(0, progress: 0.35, at: 0, app: NowPlaying.BundleID.music)
+        let ours = Scene(name: "ref-ours", events: [(0, a)], time: 4, size: .large, theme: .flat, flatColor: .yellow, showControls: false,
+                         showLyrics: false)
+        let refH: CGFloat = 344
+        let refW = refH * CGFloat(crop.width) / CGFloat(crop.height)
+        let view = HStack(alignment: .top, spacing: 20) {
+            VStack(alignment: .leading, spacing: 6) {
+                Image(decorative: crop, scale: 1).resizable().frame(width: refW, height: refH)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                Text("Reference (beskåret)").font(.system(size: 11, weight: .medium)).foregroundStyle(Color(white: 0.85))
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                scene(ours)
+                Text("Pladespiller · Flad · Gul · Stor").font(.system(size: 11, weight: .medium)).foregroundStyle(Color(white: 0.85))
+            }
+        }
+        .padding(16)
+        .background(Color(white: 0.30))
+        write(view, to: dir.appendingPathComponent("reference-sammenligning.png"), scale: 3)
     }
 }
 

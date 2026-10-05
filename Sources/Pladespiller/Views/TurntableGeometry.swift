@@ -11,10 +11,13 @@ struct TurntableGeometry: Hashable {
     let size: CGSize
     let cornerRadius: CGFloat
     let deck: CGRect
+    /// Flad stil (referencebilledet): større plade uden metalkant, meget stor cover-etiket, enkel hvid arm.
+    let flat: Bool
 
-    init(size: CGSize, cornerRadius: CGFloat, deck: CGRect? = nil) {
+    init(size: CGSize, cornerRadius: CGFloat, deck: CGRect? = nil, flat: Bool = false) {
         self.size = size
         self.cornerRadius = cornerRadius
+        self.flat = flat
         let side = min(size.width, size.height)
         self.deck = deck ?? CGRect(x: (size.width - side) / 2, y: (size.height - side) / 2, width: side, height: side)
     }
@@ -28,10 +31,11 @@ struct TurntableGeometry: Hashable {
     // Tallerken og plade (lodret centreret)
     var center: CGPoint { CGPoint(x: dx + h * 0.42, y: dy + h * 0.5) }
     var platterRadius: CGFloat { h * 0.372 }
-    var recordRadius: CGFloat { h * 0.357 }
-    var grooveOuterRadius: CGFloat { h * 0.343 }
-    var grooveInnerRadius: CGFloat { h * 0.172 }
-    var labelRadius: CGFloat { h * 0.140 }
+    var recordRadius: CGFloat { flat ? h * 0.372 : h * 0.357 }
+    var grooveOuterRadius: CGFloat { flat ? h * 0.358 : h * 0.343 }
+    var grooveInnerRadius: CGFloat { flat ? h * 0.196 : h * 0.172 }
+    /// Flad: etiketten er ca. 47 % af pladens diameter (som på referencen).
+    var labelRadius: CGFloat { flat ? recordRadius * 0.47 : h * 0.140 }
     var spindleRadius: CGFloat { h * 0.0105 }
     var holeRadius: CGFloat { h * 0.017 }
 
@@ -39,16 +43,28 @@ struct TurntableGeometry: Hashable {
     var rightColumnX: CGFloat { deck.maxX - margin - basePlateRadius }
 
     // Pickuparm (lokale koordinater: omdrejningspunkt i (0,0), armen langs +x, +y = mod pladen i hvile)
-    var pivot: CGPoint { CGPoint(x: rightColumnX, y: dy + h * 0.235) }
-    var tubeLength: CGFloat { h * 0.47 }
-    var tubeWidth: CGFloat { max(2, h * 0.021) }
-    var headshellLength: CGFloat { h * 0.088 }
-    var headshellWidth: CGFloat { h * 0.044 }
-    var headshellAngle: CGFloat { 24 * .pi / 180 }
-    var counterweightStart: CGFloat { -h * 0.062 }
-    var counterweightEnd: CGFloat { -h * 0.125 }
-    var counterweightRadius: CGFloat { h * 0.031 }
+    /// Flad: omdrejningspunktet højere og længere ude, så armen står næsten lodret ved pladens yderkant (som på referencen).
+    /// Lejet og fordybningen holdes altid inde på kroppen med samme luft (`flatEdgeGap`), også når dækket er større end kroppen.
+    var pivot: CGPoint {
+        guard flat else { return CGPoint(x: rightColumnX, y: dy + h * 0.235) }
+        let gap = flatEdgeGap
+        let x = min(deck.maxX - h * 0.105, size.width - gap - flatRecessRadius)
+        let y = max(dy + h * 0.15, gap + flatRecessRadius * 0.55, gap + abs(counterweightEnd) + counterweightRadius * 0.3)
+        return CGPoint(x: x, y: y)
+    }
+    var flatEdgeGap: CGFloat { max(8, h * 0.03) }
+    var tubeLength: CGFloat { flat ? h * 0.52 : h * 0.47 }
+    var tubeWidth: CGFloat { flat ? max(1.6, h * 0.017) : max(2, h * 0.021) }
+    var headshellLength: CGFloat { flat ? h * 0.10 : h * 0.088 }
+    var headshellWidth: CGFloat { flat ? h * 0.052 : h * 0.044 }
+    var headshellAngle: CGFloat { (flat ? 30 : 24) * .pi / 180 }
+    /// Flad: "modvægten" er det kasseformede leje (fra start til slut langs armen, halv bredde = radius).
+    var counterweightStart: CGFloat { flat ? h * 0.035 : -h * 0.062 }
+    var counterweightEnd: CGFloat { flat ? -h * 0.095 : -h * 0.125 }
+    var counterweightRadius: CGFloat { flat ? h * 0.058 : h * 0.031 }
     var basePlateRadius: CGFloat { h * 0.068 }
+    /// Flad: den svage, runde fordybning bag armens leje.
+    var flatRecessRadius: CGFloat { h * 0.13 }
 
     /// Pickupnålens position i armens lokale koordinater.
     var stylusLocal: CGPoint {

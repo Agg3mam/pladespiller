@@ -120,14 +120,27 @@ final class TurntableLayer {
         plinth.contents = newPlinth
         plinthGray.contents = TurntableImages.gray("plinth|\(style)|træ\(WoodTexture.generation)", g, scale, newPlinth)
 
+        let palette = style.flatPalette
+        // Plade, skygge og refleks afhænger af det flade temas farve: sættes ved hver ændring (cachet), med blød overtoning.
+        if !geometryChanged, record.contents != nil {
+            let fade = CATransition()
+            fade.type = .fade
+            fade.duration = 0.6
+            record.add(fade, forKey: "plinthFade")
+        }
+        platter.contents = TurntableImages.platter(g, palette, scale)
+        record.contents = TurntableImages.record(g, palette, scale)
+        sheen.contents = TurntableImages.sheen(g, palette, scale)
+        // Flad: ingen 33/45-knapper og ingen LED (passer ikke til stilen)
+        speed33.isHidden = style.isFlat
+        speed45.isHidden = style.isFlat
+        ledGlow.isHidden = style.isFlat
+
         if geometryChanged {
             platter.frame = square(g.center, half: g.platterRadius + RecordRenderer.platterMargin(g))
-            platter.contents = TurntableImages.platter(g, scale)
-
             rotor.bounds = CGRect(x: 0, y: 0, width: g.recordRadius * 2, height: g.recordRadius * 2)
             rotor.position = up(g.center)
             record.frame = rotor.bounds
-            record.contents = TurntableImages.record(g, scale)
             let lr = g.labelRadius
             let labelFrame = CGRect(x: g.recordRadius - lr, y: g.recordRadius - lr, width: lr * 2, height: lr * 2)
             for l in [labelLayer, labelGray] { l.frame = labelFrame }
@@ -135,7 +148,6 @@ final class TurntableLayer {
             for l in [previousLabelLayer, previousLabelGray] { l.frame = CGRect(origin: .zero, size: labelFrame.size) }
 
             sheen.frame = square(g.center, half: g.recordRadius)
-            sheen.contents = TurntableImages.sheen(g, scale)
 
             speed33.frame = square(g.speedButtons[0], half: g.speedButtonRadius * 1.5)
             speed45.frame = square(g.speedButtons[1], half: g.speedButtonRadius * 1.5)
@@ -168,9 +180,15 @@ final class TurntableLayer {
         let p = up(g.pivot)
         return CGPoint(x: p.x + dx, y: p.y - dy)
     }
-    private func shadowOpacity(_ lift: Double) -> Double { 0.55 - 0.27 * lift }
+    private func shadowOpacity(_ lift: Double) -> Double { (0.55 - 0.27 * lift) * ((style?.isFlat ?? false) ? 0.6 : 1) }
     private func shadowScale(_ lift: Double) -> Double { 1 + 0.05 * lift }
     private func rootOpacity(_ idle: Double) -> Double { 1 - 0.22 * idle }
+    /// "Intet spiller" dæmper normalt hele kroppen. Fylder kroppen hele widgetten (kant til kant), dæmpes kun plade og arm,
+    /// ellers ville widgettens flade skinne grumset igennem kroppen.
+    private var idleTargets: [CALayer] {
+        let fullBleed = (geometry?.cornerRadius ?? 0) >= WidgetMetrics.cornerRadius
+        return fullBleed ? [platter, rotor, sheen, armRot, shadowMove] : [root]
+    }
 
     private var speedState: Bool?
 
@@ -223,7 +241,8 @@ final class TurntableLayer {
         shadowMove.position = shadowOffset(pose.armLift)
         previousGroup.opacity = Float(pose.previousLabelOpacity)
         ledGlow.opacity = Float(pose.led)
-        root.opacity = Float(rootOpacity(pose.idle))
+        for l in [root, platter, rotor, sheen, armRot, shadowMove] { l.opacity = 1 }
+        for l in idleTargets { l.opacity = Float(rootOpacity(pose.idle)) }
     }
 
     // MARK: Live-animation
@@ -247,7 +266,8 @@ final class TurntableLayer {
         shadowMove.position = shadowOffset(pose.armLift)
         previousGroup.opacity = Float(pose.previousLabelOpacity)
         ledGlow.opacity = Float(pose.led)
-        root.opacity = Float(rootOpacity(pose.idle))
+        for l in [root, platter, rotor, sheen, armRot, shadowMove] { l.opacity = 1 }
+        for l in idleTargets { l.opacity = Float(rootOpacity(pose.idle)) }
         CATransaction.commit()
     }
 
@@ -341,7 +361,7 @@ final class TurntableLayer {
         keyframes(shadowMove, "position", dense, densePoses.map { NSValue(point: shadowOffset($0.armLift)) }, key: "lift")
         keyframes(previousGroup, "opacity", dense, densePoses.map(\.previousLabelOpacity), key: "fade")
         keyframes(ledGlow, "opacity", dense, densePoses.map(\.led), key: "led")
-        keyframes(root, "opacity", dense, densePoses.map { rootOpacity($0.idle) }, key: "idle")
+        for l in idleTargets { keyframes(l, "opacity", dense, densePoses.map { rootOpacity($0.idle) }, key: "idle") }
         CATransaction.commit()
     }
 

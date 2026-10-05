@@ -151,7 +151,7 @@ enum WoodTexture {
 }
 
 /// Flytter et CGImage over en tråd-grænse (billedet er uforanderligt).
-struct UncheckedBox<T>: @unchecked Sendable {
+nonisolated struct UncheckedBox<T>: @unchecked Sendable {
     let value: T
     init(_ value: T) { self.value = value }
 }

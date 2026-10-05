@@ -25,6 +25,8 @@ struct TurntableView: View {
     var cornerRadius: CGFloat = 20
     var deck: CGRect? = nil
     let theme: TurntableTheme
+    var flatColor: FlatColor = .auto
+    var flatCustomHex: String = "F2B705"
     let nowPlaying: NowPlaying?
     var dim: Double = 0
     var speed: SpinSpeed = .calm
@@ -36,8 +38,10 @@ struct TurntableView: View {
     @Environment(\.turntableSnapshot) private var snapshot
     @Environment(\.displayScale) private var displayScale
 
-    var geometry: TurntableGeometry { TurntableGeometry(size: size, cornerRadius: cornerRadius, deck: deck) }
-    var style: TurntableStyle { TurntableStyle.make(theme: theme, artwork: nowPlaying?.artwork) }
+    var geometry: TurntableGeometry { TurntableGeometry(size: size, cornerRadius: cornerRadius, deck: deck, flat: theme == .flat) }
+    var style: TurntableStyle {
+        TurntableStyle.make(theme: theme, artwork: nowPlaying?.artwork, flatColor: flatColor, customHex: flatCustomHex)
+    }
 
     var body: some View {
         Group {

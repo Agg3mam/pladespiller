@@ -55,23 +55,28 @@ enum TurntableImages {
     static let labels = ImageCache(capacity: 8)   // 4 etiketter + deres gråtonekopier
 
     static func key(_ name: String, _ g: TurntableGeometry, _ scale: CGFloat) -> String {
-        "\(name)|\(g.size.width)x\(g.size.height)|r\(g.cornerRadius)|d\(g.deck.minX),\(g.deck.minY),\(g.deck.width)|@\(scale)"
+        "\(name)|\(g.size.width)x\(g.size.height)|r\(g.cornerRadius)|d\(g.deck.minX),\(g.deck.minY),\(g.deck.width)|f\(g.flat)|@\(scale)"
     }
 
     static func plinth(_ g: TurntableGeometry, _ style: TurntableStyle, _ scale: CGFloat) -> CGImage? {
         shared.image(key("plinth|\(style)|træ\(WoodTexture.generation)", g, scale)) { PlinthRenderer.image(g, style: style, scale: scale) }
     }
 
-    static func record(_ g: TurntableGeometry, _ scale: CGFloat) -> CGImage? {
-        shared.image(key("record", g, scale)) { RecordRenderer.record(g, scale: scale) }
+    static func record(_ g: TurntableGeometry, _ palette: FlatPalette?, _ scale: CGFloat) -> CGImage? {
+        if let palette {
+            return shared.image(key("record|\(palette)", g, scale)) { FlatRecordRenderer.record(g, palette, scale: scale) }
+        }
+        return shared.image(key("record", g, scale)) { RecordRenderer.record(g, scale: scale) }
     }
 
-    static func platter(_ g: TurntableGeometry, _ scale: CGFloat) -> CGImage? {
-        shared.image(key("platter", g, scale)) { RecordRenderer.platter(g, scale: scale) }
+    static func platter(_ g: TurntableGeometry, _ palette: FlatPalette?, _ scale: CGFloat) -> CGImage? {
+        if palette != nil { return shared.image(key("platterFlat", g, scale)) { FlatRecordRenderer.shadow(g, scale: scale) } }
+        return shared.image(key("platter", g, scale)) { RecordRenderer.platter(g, scale: scale) }
     }
 
-    static func sheen(_ g: TurntableGeometry, _ scale: CGFloat) -> CGImage? {
-        shared.image(key("sheen", g, scale)) { RecordRenderer.sheen(g, scale: scale) }
+    static func sheen(_ g: TurntableGeometry, _ palette: FlatPalette?, _ scale: CGFloat) -> CGImage? {
+        if palette != nil { return shared.image(key("sheenFlat", g, scale)) { FlatRecordRenderer.sheen(g, scale: scale) } }
+        return shared.image(key("sheen", g, scale)) { RecordRenderer.sheen(g, scale: scale) }
     }
 
     static func arm(_ g: TurntableGeometry, _ scale: CGFloat) -> CGImage? {
@@ -81,7 +86,8 @@ enum TurntableImages {
     static func armShadow(_ g: TurntableGeometry, _ scale: CGFloat) -> CGImage? {
         shared.image(key("armShadow", g, scale)) {
             guard let s = ArmRenderer.image(g, scale: scale, silhouette: true) else { return nil }
-            return Drawing.blurred(s, radiusPx: max(1, g.h * 0.010 * scale))
+            // Flad: blødere, lavere skygge (ingen skarpe skygger)
+            return Drawing.blurred(s, radiusPx: max(1, g.h * (g.flat ? 0.022 : 0.010) * scale))
         }
     }
 
@@ -302,9 +308,15 @@ enum LabelRenderer {
             // presset ring og let skygge ind mod kanten (papir/tryk)
             ctx.drawRadialGradient(Drawing.gradient([(0, Drawing.gray(0, 0)), (0.82, Drawing.gray(0, 0)), (1, Drawing.gray(0, 0.28))]),
                                    startCenter: c, startRadius: 0, endCenter: c, endRadius: lr, options: [])
-            ctx.addPath(Drawing.circle(c, lr * 0.93)); ctx.setStrokeColor(Drawing.gray(0, 0.12)); ctx.setLineWidth(max(0.3, lr * 0.012)); ctx.strokePath()
+            if !g.flat {
+                ctx.addPath(Drawing.circle(c, lr * 0.93)); ctx.setStrokeColor(Drawing.gray(0, 0.12)); ctx.setLineWidth(max(0.3, lr * 0.012)); ctx.strokePath()
+            }
             ctx.restoreGState()
-            // spindelhul
+            // spindelhul (flad: kun en diskret prik, som på referencen)
+            if g.flat {
+                ctx.addPath(Drawing.circle(c, g.h * 0.006)); ctx.setFillColor(Drawing.gray(0, 0.35)); ctx.fillPath()
+                return
+            }
             let hr = g.holeRadius
             Drawing.fill(ctx, Drawing.circle(c, hr), Drawing.gradient([(0, Drawing.gray(0.02)), (1, Drawing.gray(0.18))]),
                          from: CGPoint(x: c.x, y: c.y - hr), to: CGPoint(x: c.x, y: c.y + hr))
@@ -347,5 +359,99 @@ enum LabelRenderer {
         (artist as NSString).draw(with: CGRect(x: c.x - aw / 2, y: c.y + lr * 0.12, width: aw, height: lr * 0.2),
                                   options: opts, attributes: artistAttr)
         NSGraphicsContext.restoreGraphicsState()
+    }
+}
+
+
+// MARK: - Flad stil (referencebilledet)
+
+/// Den lyse, gennemskinnelige plade: kroppens farve gjort lys, fine bløde riller, glat kant og zone ved etiketten,
+/// tynd lys yderkant. Blød, lav skygge under pladen; svag fast refleks ovenpå.
+enum FlatRecordRenderer {
+    static func record(_ g: TurntableGeometry, _ p: FlatPalette, scale: CGFloat) -> CGImage? {
+        let R = Float(g.recordRadius)
+        let side = CGFloat(R * 2)
+        let fi = Float(g.grooveInnerRadius) / R, fo = Float(g.grooveOuterRadius) / R, fl = Float(g.labelRadius) / R
+        let sc = Float(scale)
+        let base = p.record, alpha = p.recordAlpha
+        let n = ValueNoise(seed: 61), n2 = ValueNoise(seed: 83), n3 = ValueNoise(seed: 7)
+        let bands: [Float] = [0.66, 0.80, 0.91].map { fi + ($0 - 0.55) / 0.42 * (fo - fi) }
+        return Drawing.pixels(size: CGSize(width: side, height: side), scale: scale) { x, y in
+            let dx = x - R, dy = y - R
+            let r = (dx * dx + dy * dy).squareRoot()
+            let cov = min(max((R - r) * sc + 0.5, 0), 1)
+            if cov <= 0 { return .zero }
+            let f = r / R
+            var l: Float = 1
+            if f > fo {
+                // glat yderkant, lysere, med en tynd lys kant helt yderst og en svag mørk kant lige inden for
+                l = 1.045 + 0.07 * smoothstep(0.986, 0.998, f) - 0.03 * max(0, 1 - abs(f - fo) * R / 0.9)
+            } else if f >= fi {
+                let fine = n.value(r * sc * 0.7, 2.3) - 0.5                 // fine riller
+                let soft = n2.value(r * 0.07, 5.1) - 0.5                    // bløde bånd
+                l = 0.985 + 0.02 * fine + 0.04 * soft
+                for b in bands {
+                    // bløde trin (som referencens tydelige ringe): lys linje med en svag skygge indenfor
+                    let d = (f - b) * R
+                    l += 0.06 * max(0, 1 - abs(d) / 1.0) - 0.035 * max(0, 1 - abs(d + 1.6) / 1.4)
+                }
+                l -= 0.03 * (1 - smoothstep(fi, fi + 0.02, f))
+            } else if f > fl {
+                // glat zone ved etiketten, lidt lysere, med en tydelig ring ved overgangen til rillerne
+                l = 1.02
+                let edge = (f - fi) * R
+                l += 0.06 * max(0, 1 - abs(edge) / 0.9) - 0.04 * max(0, 1 - abs(edge + 1.5) / 1.2)
+            }
+            l *= 1 + (n3.value(x * 1.7, y * 1.7) - 0.5) * 0.012           // mat kornethed
+            let c = base * l
+            let a = alpha * cov
+            return SIMD4(min(c.x, 1) * a, min(c.y, 1) * a, min(c.z, 1) * a, a)
+        }
+    }
+
+    /// Kun skyggen under pladen (blød og lav). Selve pladen er gennemskinnelig, så skyggen fjernes under den.
+    static func shadow(_ g: TurntableGeometry, scale: CGFloat) -> CGImage? {
+        let m = RecordRenderer.platterMargin(g), R = g.recordRadius
+        let side = (g.platterRadius + m) * 2
+        let c = CGPoint(x: side / 2, y: side / 2)
+        return Drawing.image(size: CGSize(width: side, height: side), scale: scale) { ctx in
+            ctx.saveGState()
+            // skygge alene: figuren tegnes langt udenfor, skyggen forskydes tilbage
+            let far: CGFloat = 4000
+            ctx.setShadow(offset: CGSize(width: far * scale, height: -g.h * 0.014 * scale), blur: g.h * 0.06 * scale,
+                          color: Drawing.gray(0, 0.26))
+            ctx.addPath(Drawing.circle(CGPoint(x: c.x - far, y: c.y), R)); ctx.setFillColor(Drawing.gray(0)); ctx.fillPath()
+            ctx.restoreGState()
+            ctx.setBlendMode(.clear)
+            ctx.addPath(Drawing.circle(c, R * 0.985)); ctx.fillPath()
+        }
+    }
+
+    /// Fast, blød refleks: to brede, svage lyse "vinger" og en svag glans; ingen spindel.
+    static func sheen(_ g: TurntableGeometry, scale: CGFloat) -> CGImage? {
+        let R = Float(g.recordRadius)
+        let side = CGFloat(R * 2)
+        let fl = Float(g.labelRadius) / R
+        let sc = Float(scale)
+        let light: Float = -2.2
+        func angDist(_ a: Float, _ b: Float) -> Float {
+            var d = abs(a - b).truncatingRemainder(dividingBy: 2 * .pi)
+            if d > .pi { d = 2 * .pi - d }
+            return d
+        }
+        return Drawing.pixels(size: CGSize(width: side, height: side), scale: scale) { x, y in
+            let dx = x - R, dy = y - R
+            let r = (dx * dx + dy * dy).squareRoot()
+            let cov = min(max((R - r) * sc + 0.5, 0), 1)
+            if cov <= 0 { return .zero }
+            let f = r / R
+            let a = atan2(dy, dx)
+            let d1 = angDist(a, light), d2 = angDist(a, light + .pi)
+            var i = 0.13 * exp(-(d1 * d1) / 0.10) + 0.16 * exp(-(d2 * d2) / 0.06) * smoothstep(0.55, 0.95, f)
+            i += 0.035 * max(0, -(dx + dy) / (R * 1.4142))
+            i *= f < fl ? 0.25 : 1
+            let al = min(1, i) * cov
+            return SIMD4(al, al, al * 0.98, al)
+        }
     }
 }

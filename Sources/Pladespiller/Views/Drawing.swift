@@ -105,6 +105,43 @@ enum Drawing {
         return SIMD3(Float(px[0]), Float(px[1]), Float(px[2])) / 255
     }
 
+    /// Coverets fremherskende farve: farverne i et lille udsnit grupperes efter nuance; den gruppe der fylder mest
+    /// (vægtet med mætning, så små farvestænk ikke vinder over store flader, og grå ikke dominerer) vinder.
+    static func dominantColor(_ image: CGImage) -> SIMD3<Float> {
+        let n = 32
+        var px = [UInt8](repeating: 0, count: n * n * 4)
+        let ok = px.withUnsafeMutableBytes { raw -> Bool in
+            guard let ctx = CGContext(data: raw.baseAddress, width: n, height: n, bitsPerComponent: 8, bytesPerRow: n * 4,
+                                      space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            ctx.interpolationQuality = .medium
+            ctx.draw(image, in: CGRect(x: 0, y: 0, width: n, height: n))
+            return true
+        }
+        guard ok else { return SIMD3(0.5, 0.5, 0.5) }
+        let bins = 12
+        var weight = [Float](repeating: 0, count: bins + 1)       // sidste spand = grå
+        var sum = [SIMD3<Float>](repeating: .zero, count: bins + 1)
+        for i in 0..<(n * n) {
+            let c = SIMD3(Float(px[i * 4]), Float(px[i * 4 + 1]), Float(px[i * 4 + 2])) / 255
+            let mx = max(c.x, c.y, c.z), mn = min(c.x, c.y, c.z)
+            let sat = mx > 0 ? (mx - mn) / mx : 0
+            var hue: Float = 0
+            if mx > mn {
+                if mx == c.x { hue = (c.y - c.z) / (mx - mn) }
+                else if mx == c.y { hue = 2 + (c.z - c.x) / (mx - mn) }
+                else { hue = 4 + (c.x - c.y) / (mx - mn) }
+                hue = (hue / 6).truncatingRemainder(dividingBy: 1)
+                if hue < 0 { hue += 1 }
+            }
+            let bin = sat < 0.18 || mx < 0.15 ? bins : min(bins - 1, Int(hue * Float(bins)))
+            let w: Float = bin == bins ? 0.35 : (0.3 + sat) * (0.4 + mx)
+            weight[bin] += w
+            sum[bin] += c * w
+        }
+        let best = weight.indices.max { weight[$0] < weight[$1] } ?? bins
+        return weight[best] > 0 ? sum[best] / weight[best] : SIMD3(0.5, 0.5, 0.5)
+    }
+
     /// Gråtonekopi (til dæmpet look: tones ind over originalen i stedet for et CI-filter pr. billede).
     static func grayscale(_ image: CGImage) -> CGImage? {
         let w = image.width, h = image.height

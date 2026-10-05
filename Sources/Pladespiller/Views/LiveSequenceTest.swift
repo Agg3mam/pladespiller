@@ -89,6 +89,7 @@ enum LiveSequenceTest {
         let settings = Settings(defaults: UserDefaults(suiteName: suite)!)
         settings.size = .small
         settings.theme = .wood
+        settings.showControls = true      // testen måler etiketten i det klassiske Lille-layout
         let mock = MockNowPlayingSource(scripted: false)
         let store = NowPlayingStore(sources: [mock])
         let body = WidgetMetrics.bodySize(for: .small)

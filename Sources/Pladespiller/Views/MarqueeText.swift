@@ -11,8 +11,10 @@ struct MarqueeText: View {
     let size: CGFloat
     let width: CGFloat
     let active: Bool
+    var weight: NSFont.Weight = .semibold
 
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.textTint) private var tint
     @Environment(\.marqueePhase) private var fixedPhase
     @Environment(\.turntableSnapshot) private var snapshot
     @Environment(\.displayScale) private var displayScale
@@ -23,15 +25,20 @@ struct MarqueeText: View {
     static let hold: Double = 3.0      // pause ved start
     static let fade: CGFloat = 12      // blød kant: til venstre uden for tekstkolonnen, til højre inden for
 
-    private var font: NSFont { .systemFont(ofSize: size, weight: .semibold) }
+    private var font: NSFont { .systemFont(ofSize: size, weight: weight) }
+    private var swiftFont: Font { .system(size: size, weight: Font.Weight(weight)) }
+    /// Fast farve (fx på det flade temas krop) – ellers følger teksten lys/mørk tilstand.
+    private func tinted(_ t: Text) -> some View {
+        Group { if let tint { t.foregroundStyle(Color(nsColor: tint)) } else { t } }
+    }
     private var textWidth: CGFloat { ceil((text as NSString).size(withAttributes: [.font: font]).width) }
     private var lineHeight: CGFloat { ceil(font.ascender - font.descender + font.leading) }
 
     var body: some View {
         if style == .ellipsis {
-            Text(text).font(.system(size: size, weight: .semibold)).lineLimit(2).truncationMode(.tail)
+            tinted(Text(text).font(swiftFont)).lineLimit(2).truncationMode(.tail)
         } else if textWidth <= width {
-            Text(text).font(.system(size: size, weight: .semibold)).lineLimit(1)
+            tinted(Text(text).font(swiftFont)).lineLimit(1)
         } else if snapshot != nil || fixedPhase != nil {
             staticMarquee(phase: fixedPhase ?? 0)
         } else {
@@ -44,7 +51,7 @@ struct MarqueeText: View {
     }
 
     private var strip: MarqueeStrip {
-        MarqueeStrip(text: text, size: size, dark: scheme == .dark, scale: displayScale)
+        MarqueeStrip(text: text, size: size, dark: scheme == .dark, scale: displayScale, weight: weight.rawValue, tint: tint)
     }
 
     /// Til snapshots: samme billede, forskudt med en fast fase.
@@ -81,13 +88,15 @@ struct MarqueeStrip: Equatable {
     let size: CGFloat
     let dark: Bool
     let scale: CGFloat
+    var weight: CGFloat = NSFont.Weight.semibold.rawValue
+    var tint: NSColor? = nil
 
     private static let cache = ImageCache(capacity: 6)
 
     var image: CGImage? {
-        Self.cache.image("\(text)|\(size)|\(dark)|\(scale)") {
-            let font = NSFont.systemFont(ofSize: size, weight: .semibold)
-            let color = dark ? NSColor(white: 1, alpha: 0.92) : NSColor(white: 0, alpha: 0.88)
+        Self.cache.image("\(text)|\(size)|\(dark)|\(scale)|\(weight)|\(tint?.description ?? "-")") {
+            let font = NSFont.systemFont(ofSize: size, weight: NSFont.Weight(weight))
+            let color = tint ?? (dark ? NSColor(white: 1, alpha: 0.92) : NSColor(white: 0, alpha: 0.88))
             let attr: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
             let w = ceil((text as NSString).size(withAttributes: attr).width)
             let h = ceil(font.ascender - font.descender + font.leading)
@@ -185,5 +194,18 @@ final class MarqueeNSView: NSView {
         maskLayer.frame = bounds
         let f = Double(MarqueeText.fade / max(bounds.width, 1))
         maskLayer.locations = [0, NSNumber(value: f), NSNumber(value: 1 - f), 1]
+    }
+}
+
+
+extension Font.Weight {
+    init(_ w: NSFont.Weight) {
+        switch w {
+        case .bold: self = .bold
+        case .heavy: self = .heavy
+        case .medium: self = .medium
+        case .regular: self = .regular
+        default: self = .semibold
+        }
     }
 }

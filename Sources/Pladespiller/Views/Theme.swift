@@ -8,6 +8,8 @@ enum PlinthMaterial: Hashable {
     case black
     /// Mat lakeret i en farve (tema "Auto": udledt af coveret).
     case matte(r: Float, g: Float, b: Float)
+    /// Tema "Flad": ensfarvet, mat krop (referencebilledet). Farven fra `settings.flatColor`.
+    case flat(r: Float, g: Float, b: Float)
 }
 
 enum WoodSpecies: String, Hashable {
@@ -22,12 +24,21 @@ struct TurntableStyle: Hashable {
     /// Træsort for tema Træ. Kan ændres når brugeren har valgt (valnød eller lys eg).
     static var woodSpecies: WoodSpecies = .walnut
 
-    static func make(theme: TurntableTheme, artwork: NSImage?) -> TurntableStyle {
+    var isFlat: Bool { if case .flat = plinth { true } else { false } }
+    /// Farver til det flade tema (nil for de andre temaer).
+    var flatPalette: FlatPalette? {
+        if case let .flat(r, g, b) = plinth { FlatPalette(body: SIMD3(r, g, b)) } else { nil }
+    }
+
+    static func make(theme: TurntableTheme, artwork: NSImage?, flatColor: FlatColor = .auto,
+                     customHex: String = "F2B705") -> TurntableStyle {
         switch theme {
+        case .flat:
+            TurntableStyle(plinth: flatMaterial(flatColor, customHex: customHex, artwork: artwork), darkHardware: false)
         case .wood: TurntableStyle(plinth: .wood(woodSpecies), darkHardware: false)
         case .aluminium: TurntableStyle(plinth: .aluminium, darkHardware: true)
         case .black: TurntableStyle(plinth: .black, darkHardware: false)
-        case .auto, .flat:   // .flat: midlertidigt som Auto, til Grafik-agenten laver det flade tema
+        case .auto:
             if let artwork, let material = autoMaterial(for: artwork) {
                 TurntableStyle(plinth: material, darkHardware: false)
             } else {
@@ -57,6 +68,55 @@ struct TurntableStyle: Hashable {
         return m
     }
 
+    /// Neutral farve til Flad · Auto uden cover (varm lys grå, som papir).
+    static let flatNeutral = SIMD3<Float>(0.80, 0.77, 0.72)
+
+    static func flatMaterial(_ color: FlatColor, customHex: String, artwork: NSImage?) -> PlinthMaterial {
+        func q(_ v: Float) -> Float { (v * 64).rounded() / 64 }
+        let c: SIMD3<Float>
+        switch color {
+        case .auto:
+            c = artwork.flatMap(flatAutoColor(for:)) ?? flatNeutral
+        case .custom:
+            c = FlatPalette.parseHex(customHex) ?? FlatPalette.parseHex("F2B705")!
+        default:
+            c = FlatPalette.parseHex(color.hex ?? "F2B705") ?? flatNeutral
+        }
+        return .flat(r: q(c.x), g: q(c.y), b: q(c.z))
+    }
+
+    /// Flad · Auto: coverets FREMHERSKENDE farve (ikke gennemsnittet, der bliver mudret), gjort klar og mat.
+    private static var flatAutoCache: [ObjectIdentifier: SIMD3<Float>] = [:]
+    private static var flatAutoKeep: [ObjectIdentifier: NSImage] = [:]
+    private static var flatAutoOrder: [ObjectIdentifier] = []
+
+    static func flatAutoColor(for artwork: NSImage) -> SIMD3<Float>? {
+        let id = ObjectIdentifier(artwork)
+        if let hit = flatAutoCache[id] { return hit }
+        guard let cg = Drawing.cgImage(artwork) else { return nil }
+        let d = Drawing.dominantColor(cg)
+        let ns = NSColor(srgbRed: CGFloat(d.x), green: CGFloat(d.y), blue: CGFloat(d.z), alpha: 1)
+        var hue: CGFloat = 0, sat: CGFloat = 0, bri: CGFloat = 0, a: CGFloat = 0
+        ns.getHue(&hue, saturation: &sat, brightness: &bri, alpha: &a)
+        let out: SIMD3<Float>
+        if sat < 0.12 {
+            out = bri > 0.5 ? flatNeutral : SIMD3(0.24, 0.24, 0.25)       // gråt cover: neutral lys eller mørk
+        } else {
+            let o = NSColor(hue: hue, saturation: min(max(sat, 0.38), 0.82), brightness: min(max(bri, 0.52), 0.92), alpha: 1)
+                .usingColorSpace(.sRGB) ?? ns
+            out = SIMD3(Float(o.redComponent), Float(o.greenComponent), Float(o.blueComponent))
+        }
+        flatAutoCache[id] = out
+        flatAutoKeep[id] = artwork
+        flatAutoOrder.append(id)
+        while flatAutoOrder.count > 8 {
+            let old = flatAutoOrder.removeFirst()
+            flatAutoCache[old] = nil
+            flatAutoKeep[old] = nil
+        }
+        return out
+    }
+
     /// Dæmpet, mat lakfarve ud fra coverets gennemsnitsfarve.
     static func autoMaterial(from c: SIMD3<Float>) -> PlinthMaterial {
         let ns = NSColor(srgbRed: CGFloat(c.x), green: CGFloat(c.y), blue: CGFloat(c.z), alpha: 1)
@@ -73,6 +133,7 @@ struct TurntableStyle: Hashable {
 /// Tegner kroppen: materiale, lys, kant og de faste detaljer (armens fod, armstøtte, knapper, LED-fatning).
 enum PlinthRenderer {
     static func image(_ g: TurntableGeometry, style: TurntableStyle, scale: CGFloat) -> CGImage? {
+        if let palette = style.flatPalette { return flatImage(g, style: style, palette: palette, scale: scale) }
         let texture = materialTexture(style.plinth, size: g.size, h: g.h, scale: scale)
         return Drawing.image(size: g.size, scale: scale) { ctx in
             let rect = CGRect(origin: .zero, size: g.size)
@@ -85,6 +146,38 @@ enum PlinthRenderer {
             ctx.restoreGState()
             bevel(ctx, rect: rect, radius: g.cornerRadius, material: style.plinth)
             details(ctx, g, style: style, scale: scale)
+        }
+    }
+
+    /// Flad krop (referencebilledet): ensfarvet og mat med svag kornethed, næsten intet lys, ingen kant;
+    /// kun en svag rund fordybning bag armens leje og en lille armstøtte.
+    static func flatImage(_ g: TurntableGeometry, style: TurntableStyle, palette p: FlatPalette, scale: CGFloat) -> CGImage? {
+        let texture = materialTexture(style.plinth, size: g.size, h: g.h, scale: scale)
+        func col(_ c: SIMD3<Float>, _ a: CGFloat = 1) -> CGColor { Drawing.color(CGFloat(c.x), CGFloat(c.y), CGFloat(c.z), a) }
+        return Drawing.image(size: g.size, scale: scale) { ctx in
+            let rect = CGRect(origin: .zero, size: g.size)
+            let shape = CGPath(roundedRect: rect, cornerWidth: g.cornerRadius, cornerHeight: g.cornerRadius, transform: nil)
+            ctx.saveGState()
+            ctx.addPath(shape)
+            ctx.clip()
+            if let texture { drawUpright(ctx, texture, in: rect) }
+            // meget blødt lys fra oven
+            Drawing.fill(ctx, CGPath(rect: rect, transform: nil),
+                         Drawing.gradient([(0, Drawing.gray(1, 0.05)), (0.55, Drawing.gray(1, 0)), (1, Drawing.gray(0, 0.05))]),
+                         from: CGPoint(x: rect.midX, y: rect.minY), to: CGPoint(x: rect.midX, y: rect.maxY))
+
+            // Fordybning bag armens leje: en anelse mørkere skive med blød indre skygge foroven og lys kant forneden.
+            let c = g.pivot, r = g.flatRecessRadius
+            ctx.addPath(Drawing.circle(c, r)); ctx.setFillColor(col(p.recess)); ctx.fillPath()
+            ctx.saveGState()
+            ctx.addPath(Drawing.circle(c, r)); ctx.clip()
+            Drawing.fill(ctx, Drawing.circle(c, r),
+                         Drawing.gradient([(0, Drawing.gray(0, 0.07)), (0.35, Drawing.gray(0, 0)), (1, Drawing.gray(1, 0.05))]),
+                         from: CGPoint(x: c.x, y: c.y - r), to: CGPoint(x: c.x, y: c.y + r))
+            ctx.restoreGState()
+            ctx.addPath(Drawing.circle(c, r - 0.4)); ctx.setStrokeColor(col(p.body * 0.86, 0.35)); ctx.setLineWidth(0.8); ctx.strokePath()
+
+            ctx.restoreGState()
         }
     }
 
@@ -128,6 +221,15 @@ enum PlinthRenderer {
             return Drawing.pixels(size: size, scale: scale) { x, y in
                 let gch: Float = 0.072 + (n.value(x * k * 0.8, y * k * 0.8) - 0.5) * 0.008
                 return SIMD4(gch, gch, gch * 1.04, 1)
+            }
+        case let .flat(r, g, b):
+            // Meget svag struktur: fin, mat kornethed (som pulverlak/papir) og en næsten usynlig storskala-variation.
+            let n = ValueNoise(seed: 13), n2 = ValueNoise(seed: 29)
+            return Drawing.pixels(size: size, scale: scale) { x, y in
+                let grain = (n.value(x * 2.1, y * 2.1) - 0.5) * 0.022
+                let broad = (n2.fbm(x * 0.012, y * 0.012, octaves: 2) - 0.5) * 0.025
+                let t = 1 + grain + broad
+                return SIMD4(r * t, g * t, b * t, 1)
             }
         case let .matte(r, g, b):
             let n = ValueNoise(seed: 9)
@@ -360,5 +462,51 @@ enum SpeedButtonRenderer {
                 ctx.addPath(Drawing.circle(c, r * 0.28)); ctx.setFillColor(Drawing.color(1.0, 0.42, 0.16)); ctx.fillPath()
             }
         }
+    }
+}
+
+
+/// Farverne i det flade tema, udledt af kroppens farve.
+struct FlatPalette: Hashable {
+    let body: SIMD3<Float>
+
+    /// Relativ luminans (sRGB, ca.).
+    var luminance: Float { 0.2126 * body.x + 0.7152 * body.y + 0.0722 * body.z }
+    var isLight: Bool { luminance > 0.5 }
+
+    /// Pladen: en lys, gennemskinnelig udgave af kroppen (creme/guld på gul). På meget lyse kroppe lidt mørkere
+    /// end kroppen, så den stadig kan ses; på mørke kroppe en røget, lysere tone.
+    var record: SIMD3<Float> {
+        let white = SIMD3<Float>(1, 0.99, 0.96)
+        if luminance > 0.82 { return body * 0.90 + SIMD3(0.02, 0.015, 0) }
+        if isLight { return body + (white - body) * 0.70 }
+        return body + (white - body) * 0.32
+    }
+    /// Pladens gennemsigtighed (kroppens farve skinner igennem).
+    var recordAlpha: Float { isLight ? 0.94 : 0.90 }
+
+    /// Fordybningen bag armens leje: kroppen en anelse mørkere.
+    var recess: SIMD3<Float> { body * 0.94 }
+
+    /// Armens hvide dele og sølvrøret.
+    var armWhite: SIMD3<Float> { SIMD3(0.97, 0.97, 0.96) }
+
+    /// Tekst: titel (fed, mørk på lyse kroppe, lys på mørke) og kunstner (dæmpet, gennemskinnelig).
+    var titleColor: NSColor {
+        if isLight {
+            let c = body * 0.16
+            return NSColor(srgbRed: CGFloat(c.x), green: CGFloat(c.y), blue: CGFloat(c.z), alpha: 0.92)
+        }
+        return NSColor(white: 1, alpha: 0.95)
+    }
+    var secondaryColor: NSColor {
+        if luminance > 0.78 { return NSColor(white: 0, alpha: 0.38) }
+        return NSColor(white: 1, alpha: isLight ? 0.38 : 0.5)
+    }
+
+    static func parseHex(_ hex: String) -> SIMD3<Float>? {
+        let h = hex.trimmingCharacters(in: CharacterSet(charactersIn: "# ")).uppercased()
+        guard h.count == 6, let v = UInt32(h, radix: 16) else { return nil }
+        return SIMD3(Float((v >> 16) & 0xFF), Float((v >> 8) & 0xFF), Float(v & 0xFF)) / 255
     }
 }
