@@ -27,7 +27,7 @@ struct TurntableStyle: Hashable {
         case .wood: TurntableStyle(plinth: .wood(woodSpecies), darkHardware: false)
         case .aluminium: TurntableStyle(plinth: .aluminium, darkHardware: true)
         case .black: TurntableStyle(plinth: .black, darkHardware: false)
-        case .auto:
+        case .auto, .flat:   // .flat: midlertidigt som Auto, til Grafik-agenten laver det flade tema
             if let artwork, let material = autoMaterial(for: artwork) {
                 TurntableStyle(plinth: material, darkHardware: false)
             } else {

@@ -84,3 +84,7 @@ En agent ændrer kun sine egne filer. Ændringer i fælles filer bestilles hos h
 - **2026-10-04 · Stor = A "Helt træ"** (brugerens valg; grafik cc88598). Øvrige varianter fjernet. Aktiv 33/45-knap lyser orange.
 - **2026-10-04 · Spoling:** `NowPlayingSource.seek(to:)` (standard no-op), `NowPlayingStore.seek(to:)`; mock implementerer. Musikdata: Spotify/Musik. Grafik: klik/træk på fremdriftslinjen.
 - **2026-10-04 · Spoling flettet** (musik 0d3464b: core/setd på pPos til pid, coalescing 100 ms; grafik 648a654: `Views/SeekBar.swift`, klik/træk, claim ved mouseDown).
+- **2026-10-05 · Ny stil efter brugerens referencebillede** (flad, grafisk pladespiller: ensfarvet krop, lys gennemskinnelig plade, stor cover-etiket, enkel hvid arm).
+  Brugerens valg: nyt tema **Flad** (standard) ved siden af de andre; farve vælges selv (`FlatColor`: Auto fra cover, faste farver, "Vælg farve…" → `flatCustomHex`);
+  **hele** pladespilleren synlig (ikke beskåret); **står alene** (`showControls = false` som standard); **sangtekst** i hjørnet nederst til venstre fra LRCLIB,
+  ellers titel + kunstner (`showLyrics = true`). Fælles: `Shared/Lyrics.swift` (`Lyrics`, `LyricsState`), `NowPlayingStore.lyrics`.
