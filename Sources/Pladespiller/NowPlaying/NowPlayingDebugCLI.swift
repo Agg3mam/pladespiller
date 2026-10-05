@@ -11,6 +11,7 @@ import AppKit
 ///   --print-scripts        udskriv AppleScript-reservens scripts, og afslut
 ///   --applescript          brug AppleScript-reserven i stedet for Apple Events til pid (virker også i appen)
 ///   --log                  skriv også til ~/Library/Logs/Pladespiller/nowplaying.log (virker også i appen)
+///   --lyrics "Titel" "Kunstner" [sek] ["Album"]   hent fra LRCLIB (uden diskcache), print linjerne, og afslut
 ///   --quiet                kun ændringer i det viste, ikke kildernes hændelser
 enum NowPlayingDebugCLI {
     private static let clock: DateFormatter = {
@@ -40,6 +41,36 @@ enum NowPlayingDebugCLI {
             ]
             for (name, src) in scripts { print("-- \(name)\n\(src)\n") }
             exit(0)
+        }
+        if let i = args.firstIndex(of: "--lyrics") {
+            let rest = Array(args[(i + 1)...]).prefix { !$0.hasPrefix("--") }
+            guard rest.count >= 2 else {
+                print("Brug: --lyrics \"Titel\" \"Kunstner\" [sekunder] [\"Album\"]")
+                exit(2)
+            }
+            NowPlayingLog.handler = { out("  · " + $0) }
+            let q = LyricsService.Query(title: rest[rest.startIndex], artist: rest[rest.startIndex + 1],
+                                        album: rest.count > 3 ? rest[rest.startIndex + 3] : "",
+                                        duration: rest.count > 2 ? Double(rest[rest.startIndex + 2]) ?? 0 : 0)
+            // Uden diskcache, så LRCLIB faktisk spørges.
+            let service = LyricsService(cache: LyricsCache(directory: nil))
+            Task {
+                let state = await service.lyrics(for: q, trackKey: "cli")
+                switch state {
+                case .found(let l):
+                    if l.instrumental { print("(instrumental)") }
+                    for line in l.lines {
+                        let words = line.words.isEmpty ? "" : "  {\(line.words.count) ord}"
+                        print(String(format: "[%@.%02d] ", formatTime(line.start), Int((line.start * 100).truncatingRemainder(dividingBy: 100)))
+                              + (line.isInstrumental ? "♪" : line.text) + words)
+                    }
+                    exit(0)
+                default:
+                    print("Ikke fundet")
+                    exit(1)
+                }
+            }
+            RunLoop.main.run()
         }
         if args.contains("--selftest") {
             exit(NowPlayingSelfTest.run() ? 0 : 1)

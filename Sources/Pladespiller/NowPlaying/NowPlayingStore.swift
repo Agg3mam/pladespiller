@@ -10,8 +10,16 @@ final class NowPlayingStore {
     private(set) var current: NowPlaying?
     /// Sat når en kilde mangler tilladelse (Apple Events afvist). Udfyldes af Musikdata-agenten.
     private(set) var accessProblem: SourceAccessProblem?
-    /// Sangtekst til den viste sang. Udfyldes af Musikdata-agenten (LRCLIB); `.off` indtil da.
+    /// Sangtekst til den viste sang (LRCLIB). `var`, så snapshots kan sætte den direkte.
     var lyrics: LyricsState = .off
+    /// Sangtekst slået til (sættes af App.swift fra `settings.showLyrics`). Fra → `lyrics = .off`, ingen hentning.
+    var lyricsEnabled = false {
+        didSet { if lyricsEnabled != oldValue { refreshLyrics() } }
+    }
+
+    @ObservationIgnored private lazy var lyricsService = LyricsService()
+    @ObservationIgnored private var lyricsTrackKey: String?
+    @ObservationIgnored private var lyricsRequested = false
 
     @ObservationIgnored private let sources: [NowPlayingSource]
     @ObservationIgnored private var active: NowPlayingSource?
@@ -54,6 +62,53 @@ final class NowPlayingStore {
         NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
     }
 
+    /// Ny sang → `.loading` og hent (fra cache, ellers LRCLIB – men kun mens der spilles).
+    /// Svar der hører til en sang, som ikke længere vises, kasseres.
+    private func refreshLyrics() {
+        guard lyricsEnabled, let np = current else {
+            lyricsTrackKey = nil
+            lyricsRequested = false
+            setLyrics(.off)
+            return
+        }
+        let key = np.trackKey
+        if key != lyricsTrackKey {
+            lyricsTrackKey = key
+            lyricsRequested = false
+            if np.sourceAppBundleID == NowPlaying.BundleID.mock {
+                // Testkilden har opdigtede sange: spørg aldrig LRCLIB.
+                lyricsRequested = true
+                setLyrics(.notFound)
+                return
+            }
+            if let hit = lyricsService.cached(Self.lyricsQuery(np), trackKey: key) {
+                lyricsRequested = true
+                setLyrics(hit)
+                return
+            }
+            setLyrics(.loading)
+        }
+        guard !lyricsRequested, np.isPlaying else { return }   // ingen hentning mens intet spiller
+        lyricsRequested = true
+        let query = Self.lyricsQuery(np)
+        Task {
+            let result = await self.lyricsService.lyrics(for: query, trackKey: key)
+            guard self.lyricsEnabled, self.lyricsTrackKey == key else {
+                NowPlayingLog.log("[lyrics] svar til en sang der ikke længere vises – kasseret")
+                return
+            }
+            self.setLyrics(result)
+        }
+    }
+
+    private func setLyrics(_ state: LyricsState) {
+        if state != lyrics { lyrics = state }
+    }
+
+    static func lyricsQuery(_ np: NowPlaying) -> LyricsService.Query {
+        .init(title: np.title, artist: np.artist, album: np.album, duration: np.duration)
+    }
+
     /// Spiller flere, vises den der sidst ændrede sig. Spiller ingen, vises den sidst ændrede (på pause).
     /// Har ingen kilde en sang, er `current` nil, men knapperne går stadig til den sidst viste kilde.
     /// (`lastChange` flyttes kun ved ny sang / afspil-pause / spring, ikke når coveret ankommer,
@@ -72,6 +127,7 @@ final class NowPlayingStore {
                     + "kilde:\($0.sourceAppBundleID)" } ?? "intet"))
             }
             current = next
+            refreshLyrics()
         }
 
         // Adgangsproblem: helst den viste kildes, ellers den aktive kildes, ellers det første.
