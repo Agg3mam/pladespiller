@@ -160,6 +160,85 @@ enum NowPlayingSelfTest {
         RunLoop.main.run(until: Date().addingTimeInterval(0.15))
         expect(none.sent.isEmpty && abs((none.current?.position(at: Date()) ?? 0) - 5) < 0.3, "Radio: spoling ignoreres")
 
+        // Sangtekst: LRC-parsning
+        let lrc = """
+        [ar:Kunstner]
+        [ti:Titel]
+        [length: 03:20]
+        [offset:+500]
+        [00:12.00]Første linje
+        [00:05.50][01:05.50]Omkvæd
+        [00:20.00]
+        [00:25.000]<00:25.000>Ord <00:25.500>for <00:26.100>ord
+        [00:30:50]Gammelt format
+        uden tid
+        """
+        let parsed = LRCParser.parse(lrc, trackKey: "k")
+        expect(parsed.lines.map(\.text) == ["Omkvæd", "Første linje", "", "Ord for ord", "Gammelt format", "Omkvæd"],
+               "LRC: sorteret, flere tidsstempler pr. linje, metadata og linjer uden tid ignoreres")
+        expect(parsed.lines.map(\.start) == [5.0, 11.5, 19.5, 24.5, 30.0, 65.0], "LRC: offset +500 ms trækkes fra; mm:ss:xx")
+        expect(parsed.lines[2].isInstrumental, "LRC: tom linje = instrumentalt stykke")
+        expect(parsed.lines[3].words.map(\.text) == ["Ord", "for", "ord"] && parsed.lines[3].words.map(\.start) == [24.5, 25.0, 25.6],
+               "Enhanced LRC: ord-timing")
+        expect(parsed.trackKey == "k" && parsed.lineIndex(at: 12) == 1 && parsed.lineIndex(at: 1) == nil, "LRC: lineIndex")
+        expect(LRCParser.parse("Bare tekst\nuden tider", trackKey: "k").lines.isEmpty, "Kun plainLyrics → ingen linjer")
+        expect(LyricsService.state(from: LyricsCacheEntry(synced: nil, fetched: .now), trackKey: "k") == .notFound
+               && LyricsService.state(from: LyricsCacheEntry(synced: "uden tider", fetched: .now), trackKey: "k") == .notFound,
+               "Ikke fundet / kun plain → .notFound")
+        if case .found(let l) = LyricsService.state(from: LyricsCacheEntry(synced: nil, instrumental: true, fetched: .now), trackKey: "k") {
+            expect(l.instrumental && l.lines.isEmpty, "Instrumental sang → .found(instrumental)")
+        } else { expect(false, "Instrumental sang → .found(instrumental)") }
+
+        // Rensning af titler
+        let cleanCases = [("Song - Remastered 2011", "Song"), ("Song (feat. X)", "Song"), ("Song - Live", "Song"),
+                          ("Song [Remastered]", "Song"), ("Song - 2011 Remaster", "Song"), ("Song (with Y) - Radio Edit", "Song"),
+                          ("Hey - Ho", "Hey - Ho"), ("Love (Is All)", "Love (Is All)")]
+        for (input, want) in cleanCases {
+            expect(LyricsMatching.cleanTitle(input) == want, "Rens titel: “\(input)” → “\(LyricsMatching.cleanTitle(input))”")
+        }
+        expect(LyricsMatching.primaryArtist("Simon & Garfunkel, X") == "Simon", "Første kunstner")
+
+        // Valg af match
+        typealias C = LyricsMatching.Candidate
+        let candidates = [
+            C(trackName: "Song", artistName: "Band", duration: 200, syncedLyrics: nil, instrumental: false),          // kun plain
+            C(trackName: "Song", artistName: "Band", duration: 205, syncedLyrics: "[00:01.00]a", instrumental: false), // ±5 s
+            C(trackName: "Song (Live)", artistName: "Band", duration: 201.5, syncedLyrics: "[00:01.00]b", instrumental: false),
+            C(trackName: "Song", artistName: "Band", duration: 200.4, syncedLyrics: "[00:01.00]c", instrumental: false),
+            C(trackName: "Andet", artistName: "Band", duration: 200, syncedLyrics: "[00:01.00]d", instrumental: false),
+        ]
+        expect(LyricsMatching.bestMatch(candidates, title: "Song - Remastered", artist: "Band", duration: 200)?.syncedLyrics == "[00:01.00]c",
+               "Match: synced, ±2 s, tættest på varigheden, rigtig titel")
+        expect(LyricsMatching.bestMatch(candidates, title: "Song", artist: "Andet band", duration: 200) == nil, "Match: forkert kunstner → intet")
+        expect(LyricsMatching.bestMatch(candidates, title: "Song", artist: "Band", duration: nil) != nil, "Match uden varighed (radio)")
+
+        // Cache: disk, "ikke fundet" udløber efter 7 dage, LRU i hukommelsen
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("pladespiller-selftest-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let k1 = LyricsCache.key(title: "Song", artist: "Band", album: "A", duration: 200.2)
+        expect(k1 == LyricsCache.key(title: "song", artist: "BAND", album: "a", duration: 199.8), "Cache-nøgle normaliseres")
+        let c1 = LyricsCache(directory: dir, capacity: 2)
+        c1.store(LyricsCacheEntry(synced: "[00:01.00]x", fetched: .now), for: k1)
+        c1.store(LyricsCacheEntry(synced: nil, fetched: Date(timeIntervalSinceNow: -8 * 24 * 3600)), for: "gammel")
+        c1.store(LyricsCacheEntry(synced: nil, fetched: Date(timeIntervalSinceNow: -6 * 24 * 3600)), for: "ny")
+        let c2 = LyricsCache(directory: dir, capacity: 2)       // ny kørsel: læser fra disk
+        expect(c2.entry(for: k1)?.synced == "[00:01.00]x", "Cache på disk overlever ny kørsel")
+        expect(c2.entry(for: "gammel") == nil && c2.entry(for: "ny")?.isNotFound == true, "“Ikke fundet” gælder i 7 dage")
+        expect(c1.memoryKeys.count == 2, "Hukommelses-cache er begrænset")
+
+        // Store: sangtekst følger sang og indstilling (testkilden spørger aldrig LRCLIB)
+        let lyricsSource = FakeSource(id: NowPlaying.BundleID.mock)
+        let lyricsStore = NowPlayingStore(sources: [lyricsSource])
+        lyricsSource.set(playing: true, at: .now)
+        expect(lyricsStore.lyrics == .off, "Sangtekst slået fra → .off")
+        lyricsStore.lyricsEnabled = true
+        expect(lyricsStore.lyrics == .notFound, "Slået til → hentes (testkilde: ikke fundet)")
+        lyricsSource.clear()
+        expect(lyricsStore.lyrics == .off, "Ingen sang → .off")
+        lyricsSource.set(playing: true, at: .now)
+        lyricsStore.lyricsEnabled = false
+        expect(lyricsStore.lyrics == .off, "Slået fra igen → .off")
+
         // Scripts starter aldrig appen
         for (name, src) in [("Spotify status", SpotifySource.statusScriptSource), ("Musik status", MusicSource.statusScriptSource),
                             ("Musik cover", MusicSource.artworkScriptSource),
