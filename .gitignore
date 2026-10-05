@@ -3,3 +3,4 @@ build/
 snapshots/
 .DS_Store
 *.xcuserstate
+design/reference.*
