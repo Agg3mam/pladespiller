@@ -8,6 +8,7 @@ import SwiftUI
 ///   --mock                    brug testdata (scriptet løkke) i stedet for Spotify/Musik
 ///   --render-snapshots <dir>  tegn visninger til PNG og afslut (Grafik-agenten)
 ///   --nowplaying-log          log det der spiller og afslut aldrig (Musikdata-agenten)
+///   --lyrics "Titel" "Kunstner" [sek]  hent sangtekst fra LRCLIB og print den
 ///   --unregister-login-item   meld "Åbn ved login" fra og afslut (scripts/uninstall.sh)
 ///   --window-selftest [dir]   tjek gitter/placering og tegn skallen til PNG (Vindue-agenten)
 @main
@@ -25,7 +26,7 @@ enum PladespillerMain {
             SnapshotRenderer.run(outputDirectory: URL(fileURLWithPath: dir))
             exit(0)
         }
-        if args.contains("--nowplaying-log") {
+        if args.contains("--nowplaying-log") || args.contains("--lyrics") {
             NowPlayingDebugCLI.run(mock: mock)
         }
         if let i = args.firstIndex(of: "--window-selftest") {
@@ -69,6 +70,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         store.start()
+        store.lyricsEnabled = settings.showLyrics
+        observeLyricsSetting()
         let settings = settings, store = store
         let panel = WidgetPanelController(settings: settings) {
             WidgetView()
@@ -77,6 +80,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         panel.show()
         self.panel = panel
+    }
+
+    /// Hold storens sangtekst-hentning i takt med menuvalget "Vis sangtekst".
+    private func observeLyricsSetting() {
+        withObservationTracking { _ = settings.showLyrics } onChange: { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.store.lyricsEnabled = self.settings.showLyrics
+                self.observeLyricsSetting()
+            }
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {

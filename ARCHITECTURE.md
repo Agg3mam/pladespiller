@@ -88,3 +88,4 @@ En agent ændrer kun sine egne filer. Ændringer i fælles filer bestilles hos h
   Brugerens valg: nyt tema **Flad** (standard) ved siden af de andre; farve vælges selv (`FlatColor`: Auto fra cover, faste farver, "Vælg farve…" → `flatCustomHex`);
   **hele** pladespilleren synlig (ikke beskåret); **står alene** (`showControls = false` som standard); **sangtekst** i hjørnet nederst til venstre fra LRCLIB,
   ellers titel + kunstner (`showLyrics = true`). Fælles: `Shared/Lyrics.swift` (`Lyrics`, `LyricsState`), `NowPlayingStore.lyrics`.
+- **2026-10-05 · Lyrics flettet** (musik c90fb1d: `LyricsService` mod LRCLIB, LRC-parser, cache i hukommelse + disk; vindue 2e75640: menu Farve ▸, Vis knapper og tekst, Vis sangtekst, Dæmpning ▸). App.swift holder `store.lyricsEnabled` i takt med `settings.showLyrics`.
