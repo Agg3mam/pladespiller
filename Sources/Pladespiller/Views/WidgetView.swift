@@ -28,6 +28,9 @@ struct WidgetView: View {
             }
         }
         .frame(width: body.width, height: body.height)
+        .overlay {
+            if settings.christmas.isActive() { dimmed(ChristmasOverlay()) }
+        }
         .background { if liveSnapshot == nil { WindowVisibilityReader() } }   // kun live (ImageRenderer kan ikke tegne NSViews)
         .environment(\.windowIsVisible, windowVisible)
     }

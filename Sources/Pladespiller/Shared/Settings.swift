@@ -114,6 +114,29 @@ enum FullscreenLayout: String, CaseIterable, Identifiable {
     }
 }
 
+/// Julestemning: sne og lyskæde oven på temaet.
+enum ChristmasMode: String, CaseIterable, Identifiable {
+    case automatic, on, off
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .automatic: L("Automatisk i julen (1. dec–6. jan)", "Automatic at Christmas (Dec 1–Jan 6)")
+        case .on: L("Til", "On")
+        case .off: L("Fra", "Off")
+        }
+    }
+    /// Er julestemningen tændt på denne dato?
+    func isActive(on date: Date = .now, calendar: Calendar = .current) -> Bool {
+        switch self {
+        case .on: return true
+        case .off: return false
+        case .automatic:
+            let c = calendar.dateComponents([.month, .day], from: date)
+            return c.month == 12 || (c.month == 1 && (c.day ?? 99) <= 6)
+        }
+    }
+}
+
 /// Alle brugerindstillinger, gemt i UserDefaults. "Åbn ved login" gemmes ikke her:
 /// sandheden er `SMAppService.mainApp.status`.
 @Observable
@@ -131,6 +154,7 @@ final class Settings {
         static let fullscreenLayout = "pladespiller.fullscreenLayout"
         static let fullscreenScreenID = "pladespiller.fullscreenScreenID"
         static let keepDisplayAwake = "pladespiller.keepDisplayAwake"
+        static let christmas = "pladespiller.christmas"
         /// Skærmen widgetten sidst stod på (stabilt skærm-id).
         static let lastScreenID = "pladespiller.lastScreenID"
         /// Placering pr. skærm: `placement.<skærm-id>` → `"x,y"` (vinduets øverste venstre hjørne, AppKit-skærmkoordinater).
@@ -151,6 +175,7 @@ final class Settings {
         static let colorMode: ColorMode = .automatic
         static let positionLocked = false
         static let spinSpeed: SpinSpeed = .calm
+        static let christmas: ChristmasMode = .automatic
     }
 
     @ObservationIgnored private let defaults: UserDefaults
@@ -171,6 +196,8 @@ final class Settings {
     /// Skærmen fuld skærm vises på (stabilt skærm-id). Nil = automatisk: en anden skærm end hovedskærmen, hvis der er en.
     var fullscreenScreenID: String? { didSet { defaults.set(fullscreenScreenID, forKey: Key.fullscreenScreenID) } }
     var keepDisplayAwake: Bool { didSet { defaults.set(keepDisplayAwake, forKey: Key.keepDisplayAwake) } }
+    /// Julestemning (sne og lyskæde).
+    var christmas: ChristmasMode { didSet { defaults.set(christmas.rawValue, forKey: Key.christmas) } }
     var lastScreenID: String? { didSet { defaults.set(lastScreenID, forKey: Key.lastScreenID) } }
 
     init(defaults: UserDefaults = .standard) {
@@ -187,6 +214,7 @@ final class Settings {
         fullscreenLayout = defaults.string(forKey: Key.fullscreenLayout).flatMap(FullscreenLayout.init) ?? Default.fullscreenLayout
         fullscreenScreenID = defaults.string(forKey: Key.fullscreenScreenID)
         keepDisplayAwake = defaults.object(forKey: Key.keepDisplayAwake) as? Bool ?? Default.keepDisplayAwake
+        christmas = defaults.string(forKey: Key.christmas).flatMap(ChristmasMode.init) ?? Default.christmas
         lastScreenID = defaults.string(forKey: Key.lastScreenID)
     }
 

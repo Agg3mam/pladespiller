@@ -121,7 +121,7 @@ enum WindowSelfTest {
             let menu = builder.build()
             let titles = menu.items.map { $0.isSeparatorItem ? "—" : $0.title }
             print("     menu:", titles.joined(separator: " | "))
-            check("menupunkter", titles == ["Lille", "Mellem", "Stor", "—", "Tema", "Farve", "Hastighed", "Dæmpning", "—",
+            check("menupunkter", titles == ["Lille", "Mellem", "Stor", "—", "Tema", "Farve", "Hastighed", "Dæmpning", "Julestemning", "—",
                                             "Vis knapper og tekst", "Vis sangtekst", "Henter fra LRCLIB på nettet", "—",
                                             "Sprog", "Lås placering", "Åbn ved login", "—", "Fjern widget"], "\(titles)")
             check("flueben ved Stor", menu.item(withTitle: "Stor")?.state == .on && menu.item(withTitle: "Lille")?.state == .off)

@@ -57,6 +57,12 @@ struct FullscreenView: View {
                 }
             }
             .frame(width: size.width, height: size.height, alignment: .topLeading)
+            .overlay {
+                // Julestemning: lyskæden hænger lige under menulinjens dække (ikke delvist bag det).
+                if settings.christmas.isActive(), !coverStrip {
+                    ChristmasOverlay(scale: Self.unit(size) * 2.2).padding(.top, 40)
+                }
+            }
             .environment(\.windowIsVisible, snapshot != nil || WindowVisibility.shared.isVisible)
         }
         .background { if snapshot == nil { WindowVisibilityReader() } }

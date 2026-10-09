@@ -32,6 +32,7 @@ enum SnapshotRenderer {
         var lyricsTransition: Double? = nil
         /// Kun layout-tjek: tegn kun dette element på gennemsigtig baggrund.
         var probe: String? = nil
+        var christmas: ChristmasMode = .off
         var caption: String = ""
     }
 
@@ -81,6 +82,7 @@ enum SnapshotRenderer {
         lyricsAnim(dir)
         fullscreenSheet(dir)
         fullscreenLyricsAnim(dir)
+        christmasSheet(dir)
         referenceCompare(dir)
         layoutCheck(dir)
         largeFinal(dir)
@@ -222,6 +224,7 @@ enum SnapshotRenderer {
         settings.flatCustomHex = s.customHex
         settings.showControls = s.showControls
         settings.showLyrics = s.showLyrics
+        settings.christmas = s.christmas
         let store = NowPlayingStore(sources: [FixedSource(current(for: s))])
         store.start()
         let presentation = WidgetPresentation()
@@ -861,12 +864,34 @@ extension SnapshotRenderer {
 }
 
 extension SnapshotRenderer {
+    // MARK: Julestemning
+
+    static func christmasSheet(_ dir: URL) {
+        let music = NowPlaying.BundleID.music
+        let t = np(0, progress: 0.3, at: 0, app: music)
+        var scenes: [Scene] = []
+        for (theme, size, controls) in [(TurntableTheme.flat, WidgetSize.large, false), (.wood, .large, true), (.wood, .medium, false),
+                                        (.black, .small, false), (.auto, .medium, true), (.aluminium, .large, false)] {
+            scenes.append(Scene(name: "jul-\(theme.rawValue)-\(size.rawValue)", events: [(0, theme == .auto ? np(1, progress: 0.3, at: 0, app: music) : t)],
+                                time: 4, size: size, theme: theme, showControls: controls, lyrics: .notFound, christmas: .on,
+                                caption: "Jul · \(theme.title) · \(size.title)"))
+        }
+        sheet("jul", scenes, dir: dir, columns: 3)
+        if let cg = renderCG(fullscreenScene(CGSize(width: 2560, height: 1440), layout: .lyrics, theme: .wood, track: t,
+                                             lyrics: sampleLyrics(), christmas: .on)),
+           let png = NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:]) {
+            try? png.write(to: dir.appendingPathComponent("fuldskaerm-jul-2560.png"))
+        }
+    }
+
     // MARK: Fuld skærm
 
     static func fullscreenScene(_ size: CGSize, layout: FullscreenLayout, theme: TurntableTheme = .flat, color: FlatColor = .yellow,
                                 track: NowPlaying?, lyrics: LyricsState, transition: Double? = nil,
-                                problem: SourceAccessProblem? = nil, showLyrics: Bool = true) -> some View {
+                                problem: SourceAccessProblem? = nil, showLyrics: Bool = true,
+                                christmas: ChristmasMode = .off) -> some View {
         let settings = Settings(defaults: UserDefaults(suiteName: defaultsSuite)!)
+        settings.christmas = christmas
         settings.theme = theme
         settings.flatColor = color
         settings.fullscreenLayout = layout

@@ -55,6 +55,12 @@ final class WidgetMenu {
             colors.addItem(item(c.title, checked: settings.colorMode == c) { [settings] in settings.colorMode = c })
         }
         menu.addItem(submenu(L("Dæmpning", "Dimming"), colors))
+
+        let christmas = NSMenu()
+        for c in ChristmasMode.allCases {
+            christmas.addItem(item(c.title, checked: settings.christmas == c) { [settings] in settings.christmas = c })
+        }
+        menu.addItem(submenu(L("Julestemning", "Christmas mood"), christmas))
         menu.addItem(.separator())
 
         menu.addItem(item(L("Vis knapper og tekst", "Show controls and text"), checked: settings.showControls) { [settings] in
