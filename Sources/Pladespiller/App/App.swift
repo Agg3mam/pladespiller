@@ -78,6 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .environment(settings)
                 .environment(store)
         }
+        fullscreen.observePlaying { store.current?.isPlaying ?? false }
         let panel = WidgetPanelController(settings: settings) {
             WidgetView()
                 .environment(settings)
