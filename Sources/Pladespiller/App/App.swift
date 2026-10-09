@@ -87,6 +87,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.fullscreen = fullscreen
         panel.show()
         self.panel = panel
+        // `--fullscreen`: åbn fuld skærm ved start (til gennemsyn og test uden at klikke i menuen).
+        if CommandLine.arguments.contains("--fullscreen") { fullscreen.show() }
     }
 
     /// Hold storens sangtekst-hentning i takt med menuvalget "Vis sangtekst".
