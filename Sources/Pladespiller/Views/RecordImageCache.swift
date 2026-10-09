@@ -23,6 +23,14 @@ final class ImageCache {
     }
 
     var count: Int { items.count }
+
+    /// Smid billeder ud (fx de store fra fuld skærm, når den lukkes).
+    func purge(where shouldRemove: (CGImage) -> Bool) {
+        for (k, img) in items where shouldRemove(img) {
+            items[k] = nil
+            order.removeAll { $0 == k }
+        }
+    }
 }
 
 /// Hvad der står på etiketten.
@@ -58,8 +66,20 @@ enum TurntableImages {
         "\(name)|\(g.size.width)x\(g.size.height)|r\(g.cornerRadius)|d\(g.deck.minX),\(g.deck.minY),\(g.deck.width)|f\(g.flat)|@\(scale)"
     }
 
+    /// Store, bløde flader (krop, skygge, refleks) tegnes i 1x, når de er store (fuld skærm) – det kan ikke ses,
+    /// men sparer meget hukommelse. Riller og etiket tegnes altid i skærmens fulde opløsning.
+    static func softScale(_ side: CGFloat, _ scale: CGFloat) -> CGFloat { side > 500 ? min(scale, 1) : scale }
+
     static func plinth(_ g: TurntableGeometry, _ style: TurntableStyle, _ scale: CGFloat) -> CGImage? {
-        shared.image(key("plinth|\(style)|træ\(WoodTexture.generation)", g, scale)) { PlinthRenderer.image(g, style: style, scale: scale) }
+        let s = softScale(max(g.size.width, g.size.height), scale)
+        return shared.image(key("plinth|\(style)|træ\(WoodTexture.generation)", g, s)) { PlinthRenderer.image(g, style: style, scale: s) }
+    }
+
+    /// Fuld skærm lukkes: frigiv alle store billeder (over ca. 2 Mpx).
+    static func purgeLarge() {
+        let big: (CGImage) -> Bool = { $0.width * $0.height > 2_000_000 }
+        shared.purge(where: big)
+        labels.purge(where: big)
     }
 
     static func record(_ g: TurntableGeometry, _ palette: FlatPalette?, _ scale: CGFloat) -> CGImage? {
@@ -70,12 +90,18 @@ enum TurntableImages {
     }
 
     static func platter(_ g: TurntableGeometry, _ palette: FlatPalette?, _ scale: CGFloat) -> CGImage? {
-        if palette != nil { return shared.image(key("platterFlat", g, scale)) { FlatRecordRenderer.shadow(g, scale: scale) } }
+        if palette != nil {
+            let s = softScale(g.h, scale)
+            return shared.image(key("platterFlat", g, s)) { FlatRecordRenderer.shadow(g, scale: s) }
+        }
         return shared.image(key("platter", g, scale)) { RecordRenderer.platter(g, scale: scale) }
     }
 
     static func sheen(_ g: TurntableGeometry, _ palette: FlatPalette?, _ scale: CGFloat) -> CGImage? {
-        if palette != nil { return shared.image(key("sheenFlat", g, scale)) { FlatRecordRenderer.sheen(g, scale: scale) } }
+        if palette != nil {
+            let s = softScale(g.h, scale)
+            return shared.image(key("sheenFlat", g, s)) { FlatRecordRenderer.sheen(g, scale: s) }
+        }
         return shared.image(key("sheen", g, scale)) { RecordRenderer.sheen(g, scale: scale) }
     }
 

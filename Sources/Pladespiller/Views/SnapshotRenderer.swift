@@ -51,6 +51,9 @@ enum SnapshotRenderer {
         let started = Date()
         WoodTexture.loadSynchronously()
         let env = ProcessInfo.processInfo.environment
+        if env["PLADESPILLER_SNAPSHOT_FULLSCREEN"] == "1" {
+            fullscreenSheet(dir); fullscreenLyricsAnim(dir); return
+        }
         if env["PLADESPILLER_SNAPSHOT_FLAT"] == "1" {          // hurtig gentagelse af Flad-arbejdet
             flatSheet(dir); lyricsAnim(dir); referenceCompare(dir); layoutCheck(dir); return
         }
@@ -76,6 +79,8 @@ enum SnapshotRenderer {
 
         flatSheet(dir)
         lyricsAnim(dir)
+        fullscreenSheet(dir)
+        fullscreenLyricsAnim(dir)
         referenceCompare(dir)
         layoutCheck(dir)
         largeFinal(dir)
@@ -858,6 +863,106 @@ extension SnapshotRenderer {
         .padding(16)
         .background(Color(white: 0.30))
         write(view, to: dir.appendingPathComponent("reference-sammenligning.png"), scale: 3)
+    }
+}
+
+extension SnapshotRenderer {
+    // MARK: Fuld skærm
+
+    static func fullscreenScene(_ size: CGSize, layout: FullscreenLayout, theme: TurntableTheme = .flat, color: FlatColor = .yellow,
+                                track: NowPlaying?, lyrics: LyricsState, transition: Double? = nil,
+                                problem: SourceAccessProblem? = nil, showLyrics: Bool = true) -> some View {
+        let settings = Settings(defaults: UserDefaults(suiteName: defaultsSuite)!)
+        settings.theme = theme
+        settings.flatColor = color
+        settings.fullscreenLayout = layout
+        settings.showLyrics = showLyrics
+        let store = NowPlayingStore(sources: [FixedSource(track)])
+        store.start()
+        var a = TurntableAnimator(geometry: TurntableGeometry(size: CGSize(width: 148, height: 148), cornerRadius: 20, flat: theme == .flat))
+        a.setSpeed(.calm, at: 0)
+        a.update(track.map { TurntableInput($0, at: base) }, at: 0)
+        return FullscreenView()
+            .frame(width: size.width, height: size.height)
+            .environment(settings)
+            .environment(store)
+            .environment(\.turntableSnapshot, TurntableSnapshotPose(pose: a.pose(at: 4)))
+            .environment(\.snapshotLyrics, lyrics)
+            .environment(\.snapshotAccessProblem, problem)
+            .environment(\.lyricsTransition, transition)
+            .environment(\.displayScale, 1)
+    }
+
+    static func renderCG(_ view: some View, scale: CGFloat = 1) -> CGImage? {
+        let r = ImageRenderer(content: view)
+        r.scale = scale
+        return r.cgImage
+    }
+
+    /// Kontaktark af store billeder: hvert billede tegnes i fuld størrelse (1x) og vises formindsket.
+    static func bigSheet(_ name: String, _ items: [(String, CGImage)], dir: URL, columns: Int, cellWidth: CGFloat) {
+        let rows = stride(from: 0, to: items.count, by: columns).map { Array(items[$0..<min($0 + columns, items.count)]) }
+        let view = VStack(alignment: .leading, spacing: 18) {
+            ForEach(rows.indices, id: \.self) { r in
+                HStack(alignment: .top, spacing: 18) {
+                    ForEach(rows[r].indices, id: \.self) { c in
+                        let it = rows[r][c]
+                        let h = cellWidth * CGFloat(it.1.height) / CGFloat(it.1.width)
+                        VStack(alignment: .leading, spacing: 5) {
+                            Image(decorative: it.1, scale: 1).resizable().interpolation(.high).frame(width: cellWidth, height: h)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                            Text(it.0).font(.system(size: 13, weight: .medium)).foregroundStyle(Color(white: 0.85))
+                        }
+                    }
+                }
+            }
+        }
+        .padding(18)
+        .background(Color(white: 0.30))
+        write(view, to: dir.appendingPathComponent("\(name).png"), scale: 1)
+    }
+
+    static func fullscreenSheet(_ dir: URL) {
+        let music = NowPlaying.BundleID.music
+        let a = np(0, progress: 0.35, at: 0, app: music), b = np(1, progress: 0.35, at: 0, app: music)
+        let paused = np(0, playing: false, progress: 0.35, at: 0, app: music)
+        let lyr = sampleLyrics()
+        var items: [(String, CGImage)] = []
+        func add(_ caption: String, _ v: some View) { if let cg = renderCG(v) { items.append((caption, cg)) } }
+        for size in [CGSize(width: 2560, height: 1440), CGSize(width: 1920, height: 1080)] {
+            let s = "\(Int(size.width))×\(Int(size.height))"
+            add("\(s) · Med sangtekst · Gul", fullscreenScene(size, layout: .lyrics, track: a, lyrics: lyr))
+            add("\(s) · Kun pladespiller · Gul · sangtekst", fullscreenScene(size, layout: .turntable, track: a, lyrics: lyr))
+            add("\(s) · Med sangtekst · Auto · ingen tekst fundet", fullscreenScene(size, layout: .lyrics, color: .auto, track: b, lyrics: .notFound))
+            add("\(s) · Kun pladespiller · Auto", fullscreenScene(size, layout: .turntable, color: .auto, track: b, lyrics: .notFound))
+            add("\(s) · Med sangtekst · Sort", fullscreenScene(size, layout: .lyrics, color: .black, track: a, lyrics: lyr))
+            add("\(s) · Med sangtekst · pause", fullscreenScene(size, layout: .lyrics, track: paused, lyrics: lyr))
+            add("\(s) · Kun pladespiller · pause · Sort", fullscreenScene(size, layout: .turntable, color: .black, track: paused, lyrics: .notFound))
+            add("\(s) · Med sangtekst · intet spiller", fullscreenScene(size, layout: .lyrics, track: nil, lyrics: .off))
+        }
+        add("3440×1440 · Med sangtekst · Gul (ultrabred)", fullscreenScene(CGSize(width: 3440, height: 1440), layout: .lyrics, track: a, lyrics: lyr))
+        let problem = SourceAccessProblem(bundleID: NowPlaying.BundleID.spotify, message: "Ingen adgang til Spotify · Åbn Indstillinger")
+        add("2560×1440 · manglende tilladelse", fullscreenScene(CGSize(width: 2560, height: 1440), layout: .turntable, track: nil, lyrics: .off,
+                                                             problem: problem))
+        add("2560×1440 · Træ · Med sangtekst", fullscreenScene(CGSize(width: 2560, height: 1440), layout: .lyrics, theme: .wood, track: a, lyrics: lyr))
+        bigSheet("fuldskaerm", items, dir: dir, columns: 3, cellWidth: 840)
+        if let first = items.first, let png = NSBitmapImageRep(cgImage: first.1).representation(using: .png, properties: [:]) {
+            try? png.write(to: dir.appendingPathComponent("fuldskaerm-detalje-2560.png"))
+        }
+        TurntableImages.purgeLarge()
+    }
+
+    static func fullscreenLyricsAnim(_ dir: URL) {
+        let at = np(0, progress: 84.05 / 238, at: 0, app: NowPlaying.BundleID.music)
+        var items: [(String, CGImage)] = []
+        for (i, p) in [0.0, 0.3, 0.6, 1.0].enumerated() {
+            if let cg = renderCG(fullscreenScene(CGSize(width: 2560, height: 1440), layout: .lyrics, track: at, lyrics: sampleLyrics(),
+                                                 transition: p < 1 ? p : nil)) {
+                items.append((String(format: "trin %d (%.2f s)", i + 1, p * 0.5), cg))
+            }
+        }
+        bigSheet("fuldskaerm-lyrics-anim", items, dir: dir, columns: 2, cellWidth: 1100)
+        TurntableImages.purgeLarge()
     }
 }
 

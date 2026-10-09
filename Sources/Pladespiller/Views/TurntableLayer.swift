@@ -118,7 +118,9 @@ final class TurntableLayer {
             plinthGray.add(fade, forKey: "plinthFade")
         }
         plinth.contents = newPlinth
-        plinthGray.contents = TurntableImages.gray("plinth|\(style)|træ\(WoodTexture.generation)", g, scale, newPlinth)
+        // Gråtonekopien laves først, når der faktisk dæmpes (en kopi af en fuldskærmskrop er stor).
+        grayKey = "plinth|\(style)|træ\(WoodTexture.generation)"
+        plinthGray.contents = dim > 0 ? TurntableImages.gray(grayKey, g, scale, newPlinth) : nil
 
         let palette = style.flatPalette
         // Plade, skygge og refleks afhænger af det flade temas farve: sættes ved hver ændring (cachet), med blød overtoning.
@@ -186,7 +188,9 @@ final class TurntableLayer {
     /// "Intet spiller" dæmper normalt hele kroppen. Fylder kroppen hele widgetten (kant til kant), dæmpes kun plade og arm,
     /// ellers ville widgettens flade skinne grumset igennem kroppen.
     private var idleTargets: [CALayer] {
-        let fullBleed = (geometry?.cornerRadius ?? 0) >= WidgetMetrics.cornerRadius
+        // Kant til kant: widgetten (radius 28) eller fuld skærm (radius 0, kroppen er hele vinduet).
+        let r = geometry?.cornerRadius ?? 20
+        let fullBleed = r >= WidgetMetrics.cornerRadius || r == 0
         return fullBleed ? [platter, rotor, sheen, armRot, shadowMove] : [root]
     }
 
@@ -410,9 +414,13 @@ final class TurntableLayer {
     static var dimOpacity: Double { WidgetMetrics.dimContentOpacity }
 
     private(set) var dim: Double = 0
+    private var grayKey = ""
 
     func setDim(_ amount: Double, animated: Bool) {
         let a = min(max(amount, 0), 1)
+        if a > 0, plinthGray.contents == nil, let g = geometry, let img = plinth.contents {
+            plinthGray.contents = TurntableImages.gray(grayKey, g, scale, (img as! CGImage))
+        }
         let grayTarget = Float(a * Self.dimSaturationLoss)
         let opTarget = Float(1 - (1 - Self.dimOpacity) * a)
         CATransaction.begin()
