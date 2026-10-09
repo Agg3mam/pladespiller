@@ -114,9 +114,16 @@ struct FullscreenView: View {
         return ZStack(alignment: .topLeading) {
             if let np {
                 if case .found(let l) = lyrics, settings.showLyrics, l.trackKey == np.trackKey, !l.lines.isEmpty || l.instrumental {
+                    // Sangteksten holder sig i sit eget felt og fader blødt ud foroven og forneden, så de kommende
+                    // linjer aldrig løber ned i titel og kunstner nederst (altid mindst ca. 12 % af højden luft).
                     FullscreenLyrics(np: np, lyrics: l, unit: u, width: width, colors: colors)
-                        .frame(width: width, height: size.height * 0.78, alignment: .leading)
-                        .offset(x: x, y: size.height * 0.08)
+                        .frame(width: width, height: size.height * 0.74, alignment: .leading)
+                        .mask {
+                            LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.12),
+                                                   .init(color: .black, location: 0.74), .init(color: .clear, location: 1)],
+                                           startPoint: .top, endPoint: .bottom)
+                        }
+                        .offset(x: x, y: size.height * 0.06)
                     meta(np, unit: u, colors: colors, large: false)
                         .frame(width: width, alignment: .leading)
                         .offset(x: x, y: size.height - u * 120)
