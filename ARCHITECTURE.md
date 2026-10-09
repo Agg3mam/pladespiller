@@ -94,3 +94,4 @@ En agent ændrer kun sine egne filer. Ændringer i fælles filer bestilles hos h
   åbnes fra menuen ▸ Fuld skærm, lukkes med Esc. Fælles: `Settings.fullscreenLayout`, `fullscreenScreenID` (nil = automatisk ekstra skærm), `keepDisplayAwake`.
   Pladsholdere: `Window/FullscreenController.swift` (Vindue), `Views/FullscreenView.swift` (Grafik); App.swift sætter `panel.fullscreen`.
 - **2026-10-09 · Fuld skærm flettet** (vindue a62f56a: kantløst panel på statusBar+1 på ekstra skærm, Esc, cursor, IOPM-assertion; grafik 0735747: `FullscreenView` med sangtekst / kun pladespiller, skalerer med højden; musik a921b77: LRCLIB-backoff 15/60/300 s).
+- **2026-10-09 · Fuld skærm = levende baggrund** (vindue 9b69c6c, niveau desktopIconWindow+1) **+ flyt nye vinduer væk** (b83a6ba, `Window/NewWindowMover.swift`, AXObserver kWindowCreated kun mens fuld skærm vises; kræver Tilgængelighed, brugeren har sagt ja; lokal nøgle `pladespiller.fullscreen.moveNewWindows`).
