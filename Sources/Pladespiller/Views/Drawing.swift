@@ -73,6 +73,19 @@ enum Drawing {
         ctx.restoreGState()
     }
 
+    /// Sort silhuet af et billede (samme alfa).
+    static func silhouette(_ img: CGImage) -> CGImage? {
+        // Uden den vendte kontekst fra `image(size:)`, så masken ikke spejles.
+        guard let ctx = CGContext(data: nil, width: img.width, height: img.height, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        let r = CGRect(x: 0, y: 0, width: img.width, height: img.height)
+        ctx.draw(img, in: r)
+        ctx.setBlendMode(.sourceIn)
+        ctx.setFillColor(gray(0))
+        ctx.fill(r)
+        return ctx.makeImage()
+    }
+
     /// Gaussisk sløring (bruges én gang pr. størrelse til skygger).
     static func blurred(_ image: CGImage, radiusPx: CGFloat) -> CGImage? {
         let ci = CIImage(cgImage: image)

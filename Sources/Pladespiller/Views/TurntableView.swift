@@ -31,6 +31,8 @@ struct TurntableView: View {
     var dim: Double = 0
     var speed: SpinSpeed = .calm
     var scrubbing = false
+    /// Fuld skærm: kroppen som én ren farve.
+    var solidBody = false
     var onArmClick: () -> Void = {}
     var onRecordClick: () -> Void = {}
     var onSpeedClick: (SpinSpeed) -> Void = { _ in }
@@ -40,7 +42,7 @@ struct TurntableView: View {
 
     var geometry: TurntableGeometry { TurntableGeometry(size: size, cornerRadius: cornerRadius, deck: deck, flat: theme == .flat) }
     var style: TurntableStyle {
-        TurntableStyle.make(theme: theme, artwork: nowPlaying?.artwork, flatColor: flatColor, customHex: flatCustomHex)
+        TurntableStyle.make(theme: theme, artwork: nowPlaying?.artwork, flatColor: flatColor, customHex: flatCustomHex, solidBody: solidBody)
     }
 
     var body: some View {

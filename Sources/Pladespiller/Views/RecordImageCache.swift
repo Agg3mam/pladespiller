@@ -109,12 +109,19 @@ enum TurntableImages {
     static func arm(_ g: TurntableGeometry, _ style: TurntableStyle, _ scale: CGFloat) -> CGImage? {
         let finish: ArmRenderer.Finish = style.isFlat ? .flat(dark: style.flatArmDark) : .realistic
         let name = style.isFlat ? (style.flatArmDark ? "armFlatDark" : "armFlatLight") : "arm"
-        return shared.image(key(name, g, scale)) { ArmRenderer.image(g, scale: scale, finish: finish) }
+        return shared.image(key(name, g, scale)) {
+            // Realistisk: 3D-modellen (SceneKit); uden Metal den tegnede arm.
+            if !style.isFlat, let real = Arm3D.image(g, scale: scale) { return real }
+            return ArmRenderer.image(g, scale: scale, finish: finish)
+        }
     }
 
-    static func armShadow(_ g: TurntableGeometry, _ scale: CGFloat) -> CGImage? {
-        shared.image(key("armShadow", g, scale)) {
-            guard let s = ArmRenderer.image(g, scale: scale, finish: .silhouette) else { return nil }
+    static func armShadow(_ g: TurntableGeometry, _ style: TurntableStyle, _ scale: CGFloat) -> CGImage? {
+        shared.image(key(style.isFlat ? "armShadowFlat" : "armShadow", g, scale)) {
+            // Skyggen har præcis armens omrids: 3D-armens alfa, eller den tegnede silhuet.
+            let source = style.isFlat ? ArmRenderer.image(g, scale: scale, finish: .silhouette)
+                                      : arm(g, style, scale).flatMap(Drawing.silhouette)
+            guard let s = source else { return nil }
             // Flad: blødere, lavere skygge (ingen skarpe skygger)
             return Drawing.blurred(s, radiusPx: max(1, g.h * (g.flat ? 0.022 : 0.010) * scale))
         }

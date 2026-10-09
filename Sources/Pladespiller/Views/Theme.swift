@@ -22,6 +22,8 @@ struct TurntableStyle: Hashable {
     var darkHardware: Bool
     /// Flad: armen (og dens bundplade og støtte) er sort i stedet for hvid, fordi macOS står i mørk tilstand.
     var flatArmDark = false
+    /// Fuld skærm: kroppen er én ren farve (materialets farve) i stedet for et foto/mønster strakt over hele skærmen.
+    var solidBody = false
 
     /// Træsort for tema Træ. Kan ændres når brugeren har valgt (valnød eller lys eg).
     static var woodSpecies: WoodSpecies = .walnut
@@ -33,7 +35,14 @@ struct TurntableStyle: Hashable {
     }
 
     static func make(theme: TurntableTheme, artwork: NSImage?, flatColor: FlatColor = .auto,
-                     customHex: String = "F2B705", flatArmDark: Bool? = nil) -> TurntableStyle {
+                     customHex: String = "F2B705", flatArmDark: Bool? = nil, solidBody: Bool = false) -> TurntableStyle {
+        var style = makeBase(theme: theme, artwork: artwork, flatColor: flatColor, customHex: customHex, flatArmDark: flatArmDark)
+        style.solidBody = solidBody && !style.isFlat
+        return style
+    }
+
+    private static func makeBase(theme: TurntableTheme, artwork: NSImage?, flatColor: FlatColor,
+                                 customHex: String, flatArmDark: Bool?) -> TurntableStyle {
         switch theme {
         case .flat:
             TurntableStyle(plinth: flatMaterial(flatColor, customHex: customHex, artwork: artwork), darkHardware: false,
@@ -137,6 +146,7 @@ struct TurntableStyle: Hashable {
 enum PlinthRenderer {
     static func image(_ g: TurntableGeometry, style: TurntableStyle, scale: CGFloat) -> CGImage? {
         if let palette = style.flatPalette { return flatImage(g, style: style, palette: palette, scale: scale) }
+        if style.solidBody { return solidImage(g, style: style, scale: scale) }
         let texture = materialTexture(style.plinth, size: g.size, h: g.h, scale: scale)
         return Drawing.image(size: g.size, scale: scale) { ctx in
             let rect = CGRect(origin: .zero, size: g.size)
@@ -149,6 +159,32 @@ enum PlinthRenderer {
             ctx.restoreGState()
             bevel(ctx, rect: rect, radius: g.cornerRadius, material: style.plinth)
             details(ctx, g, style: style, scale: scale)
+        }
+    }
+
+    /// Fuld skærm: én ren farve (materialets egen farve) med kun et meget blødt lys fra oven, plus de faste detaljer.
+    static func solidImage(_ g: TurntableGeometry, style: TurntableStyle, scale: CGFloat) -> CGImage? {
+        let c = solidColor(style.plinth)
+        return Drawing.image(size: g.size, scale: scale) { ctx in
+            let rect = CGRect(origin: .zero, size: g.size)
+            ctx.setFillColor(Drawing.color(CGFloat(c.x), CGFloat(c.y), CGFloat(c.z)))
+            ctx.fill(rect)
+            Drawing.fill(ctx, CGPath(rect: rect, transform: nil),
+                         Drawing.gradient([(0, Drawing.gray(1, 0.04)), (0.55, Drawing.gray(1, 0)), (1, Drawing.gray(0, 0.06))]),
+                         from: CGPoint(x: rect.midX, y: rect.minY), to: CGPoint(x: rect.midX, y: rect.maxY))
+            details(ctx, g, style: style, scale: scale)
+        }
+    }
+
+    /// Materialets farve: træ = gennemsnittet af træfotoet (dyb valnød), aluminium lys grå, sort næsten sort.
+    static func solidColor(_ m: PlinthMaterial) -> SIMD3<Float> {
+        switch m {
+        case .wood:
+            if let wood = WoodTexture.image { return Drawing.averageColor(wood) * 0.92 }
+            return SIMD3(0.25, 0.13, 0.07)
+        case .aluminium: return SIMD3(0.76, 0.77, 0.78)
+        case .black: return SIMD3(0.075, 0.075, 0.08)
+        case let .matte(r, g, b), let .flat(r, g, b): return SIMD3(r, g, b)
         }
     }
 
@@ -316,44 +352,50 @@ enum PlinthRenderer {
         shadowAt(h * 0.004, h * 0.008, blur: h * 0.02, shadow)
         ctx.addPath(Drawing.circle(p, br)); ctx.setFillColor(Drawing.gray(0.5)); ctx.fillPath()
         ctx.restoreGState()
-        // Sort, rund fod (som på en DJ-pladespiller) med en drejet sølvring om lejet og en sort antiskating-knap.
-        Drawing.fill(ctx, Drawing.circle(p, br), Drawing.gradient([(0, Drawing.gray(0.24)), (0.5, Drawing.gray(0.10)), (1, Drawing.gray(0.05))]),
-                     from: CGPoint(x: p.x - br, y: p.y - br), to: CGPoint(x: p.x + br, y: p.y + br))
-        ctx.addPath(Drawing.circle(p, br - 0.4)); ctx.setStrokeColor(Drawing.gray(1, 0.18)); ctx.setLineWidth(0.6); ctx.strokePath()
-        ctx.addPath(Drawing.circle(p, br * 0.86)); ctx.setStrokeColor(Drawing.gray(0, 0.5)); ctx.setLineWidth(max(0.4, h * 0.0016)); ctx.strokePath()
-        let ringR = br * 0.62
-        Drawing.fill(ctx, Drawing.circle(p, ringR), Drawing.gradient([(0, Drawing.gray(0.95)), (0.5, Drawing.gray(0.72)), (1, Drawing.gray(0.45))]),
-                     from: CGPoint(x: p.x - ringR, y: p.y - ringR), to: CGPoint(x: p.x + ringR, y: p.y + ringR))
-        // drejet aluminium: tætte, svage ringe og to modsatte lysvinger (lyset øverst til venstre)
-        ctx.saveGState()
-        ctx.addPath(Drawing.circle(p, ringR)); ctx.clip()
-        var turned = ringR * 0.1
-        while turned < ringR { ctx.addPath(Drawing.circle(p, turned)); turned += max(0.6, h * 0.0024) }
-        ctx.setStrokeColor(Drawing.gray(0, 0.07)); ctx.setLineWidth(max(0.25, h * 0.0008)); ctx.strokePath()
-        for a in [-2.2, -2.2 + CGFloat.pi] {
-            let wedge = CGMutablePath()
-            wedge.move(to: p)
-            wedge.addArc(center: p, radius: ringR, startAngle: a - 0.22, endAngle: a + 0.22, clockwise: false)
-            wedge.closeSubpath()
-            ctx.addPath(wedge); ctx.setFillColor(Drawing.gray(1, 0.25)); ctx.fillPath()
+        // 3D-foden (SceneKit) med samme lys som armen; uden Metal den tegnede fod.
+        let baseBox = Arm3D.baseRect(g)
+        if let base3D = Arm3D.base(g, scale: scale) {
+            drawUpright(ctx, base3D, in: baseBox.offsetBy(dx: p.x, dy: p.y))
+        } else {
+            // Sort, rund fod (som på en DJ-pladespiller) med en drejet sølvring om lejet og en sort antiskating-knap.
+            Drawing.fill(ctx, Drawing.circle(p, br), Drawing.gradient([(0, Drawing.gray(0.24)), (0.5, Drawing.gray(0.10)), (1, Drawing.gray(0.05))]),
+                         from: CGPoint(x: p.x - br, y: p.y - br), to: CGPoint(x: p.x + br, y: p.y + br))
+            ctx.addPath(Drawing.circle(p, br - 0.4)); ctx.setStrokeColor(Drawing.gray(1, 0.18)); ctx.setLineWidth(0.6); ctx.strokePath()
+            ctx.addPath(Drawing.circle(p, br * 0.86)); ctx.setStrokeColor(Drawing.gray(0, 0.5)); ctx.setLineWidth(max(0.4, h * 0.0016)); ctx.strokePath()
+            let ringR = br * 0.62
+            Drawing.fill(ctx, Drawing.circle(p, ringR), Drawing.gradient([(0, Drawing.gray(0.95)), (0.5, Drawing.gray(0.72)), (1, Drawing.gray(0.45))]),
+                         from: CGPoint(x: p.x - ringR, y: p.y - ringR), to: CGPoint(x: p.x + ringR, y: p.y + ringR))
+            // drejet aluminium: tætte, svage ringe og to modsatte lysvinger (lyset øverst til venstre)
+            ctx.saveGState()
+            ctx.addPath(Drawing.circle(p, ringR)); ctx.clip()
+            var turned = ringR * 0.1
+            while turned < ringR { ctx.addPath(Drawing.circle(p, turned)); turned += max(0.6, h * 0.0024) }
+            ctx.setStrokeColor(Drawing.gray(0, 0.07)); ctx.setLineWidth(max(0.25, h * 0.0008)); ctx.strokePath()
+            for a in [-2.2, -2.2 + CGFloat.pi] {
+                let wedge = CGMutablePath()
+                wedge.move(to: p)
+                wedge.addArc(center: p, radius: ringR, startAngle: a - 0.22, endAngle: a + 0.22, clockwise: false)
+                wedge.closeSubpath()
+                ctx.addPath(wedge); ctx.setFillColor(Drawing.gray(1, 0.25)); ctx.fillPath()
+            }
+            ctx.restoreGState()
+            ctx.addPath(Drawing.circle(p, ringR)); ctx.setStrokeColor(Drawing.gray(0, 0.45)); ctx.setLineWidth(0.6); ctx.strokePath()
+            // antiskating-knap: sort, riflet kant, hvid streg
+            let knob = CGPoint(x: p.x + br * 0.78 * cos(-0.35), y: p.y + br * 0.78 * sin(-0.35)), kr = br * 0.24
+            ctx.saveGState()
+            shadowAt(h * 0.002, h * 0.004, blur: h * 0.006, shadow)
+            Drawing.fill(ctx, Drawing.circle(knob, kr), Drawing.gradient([(0, Drawing.gray(0.32)), (1, Drawing.gray(0.06))]),
+                         from: CGPoint(x: knob.x - kr, y: knob.y - kr), to: CGPoint(x: knob.x + kr, y: knob.y + kr))
+            ctx.restoreGState()
+            for i in 0..<16 {
+                let a = CGFloat(i) / 16 * 2 * .pi
+                ctx.move(to: CGPoint(x: knob.x + kr * 0.82 * cos(a), y: knob.y + kr * 0.82 * sin(a)))
+                ctx.addLine(to: CGPoint(x: knob.x + kr * cos(a), y: knob.y + kr * sin(a)))
+            }
+            ctx.setStrokeColor(Drawing.gray(1, 0.18)); ctx.setLineWidth(max(0.3, h * 0.001)); ctx.strokePath()
+            ctx.move(to: knob); ctx.addLine(to: CGPoint(x: knob.x + kr * 0.7 * cos(-1.2), y: knob.y + kr * 0.7 * sin(-1.2)))
+            ctx.setStrokeColor(Drawing.gray(1, 0.85)); ctx.setLineWidth(max(0.4, h * 0.0018)); ctx.strokePath()
         }
-        ctx.restoreGState()
-        ctx.addPath(Drawing.circle(p, ringR)); ctx.setStrokeColor(Drawing.gray(0, 0.45)); ctx.setLineWidth(0.6); ctx.strokePath()
-        // antiskating-knap: sort, riflet kant, hvid streg
-        let knob = CGPoint(x: p.x + br * 0.78 * cos(-0.35), y: p.y + br * 0.78 * sin(-0.35)), kr = br * 0.24
-        ctx.saveGState()
-        shadowAt(h * 0.002, h * 0.004, blur: h * 0.006, shadow)
-        Drawing.fill(ctx, Drawing.circle(knob, kr), Drawing.gradient([(0, Drawing.gray(0.32)), (1, Drawing.gray(0.06))]),
-                     from: CGPoint(x: knob.x - kr, y: knob.y - kr), to: CGPoint(x: knob.x + kr, y: knob.y + kr))
-        ctx.restoreGState()
-        for i in 0..<16 {
-            let a = CGFloat(i) / 16 * 2 * .pi
-            ctx.move(to: CGPoint(x: knob.x + kr * 0.82 * cos(a), y: knob.y + kr * 0.82 * sin(a)))
-            ctx.addLine(to: CGPoint(x: knob.x + kr * cos(a), y: knob.y + kr * sin(a)))
-        }
-        ctx.setStrokeColor(Drawing.gray(1, 0.18)); ctx.setLineWidth(max(0.3, h * 0.001)); ctx.strokePath()
-        ctx.move(to: knob); ctx.addLine(to: CGPoint(x: knob.x + kr * 0.7 * cos(-1.2), y: knob.y + kr * 0.7 * sin(-1.2)))
-        ctx.setStrokeColor(Drawing.gray(1, 0.85)); ctx.setLineWidth(max(0.4, h * 0.0018)); ctx.strokePath()
 
         // Armstøtte
         let restP = g.world(CGPoint(x: g.armRestLocalX, y: 0), armAngle: g.restAngle)

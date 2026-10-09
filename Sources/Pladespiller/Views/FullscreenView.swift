@@ -31,7 +31,8 @@ struct FullscreenView: View {
     private var lyrics: LyricsState { snapshotLyrics ?? store.lyrics }
     private var problem: SourceAccessProblem? { snapshotProblem ?? store.accessProblem }
     private var style: TurntableStyle {
-        TurntableStyle.make(theme: settings.theme, artwork: np?.artwork, flatColor: settings.flatColor, customHex: settings.flatCustomHex)
+        TurntableStyle.make(theme: settings.theme, artwork: np?.artwork, flatColor: settings.flatColor, customHex: settings.flatCustomHex,
+                            solidBody: true)
     }
 
     var body: some View {
@@ -67,7 +68,7 @@ struct FullscreenView: View {
     private func turntable(_ size: CGSize, deck: CGRect) -> some View {
         TurntableView(size: size, cornerRadius: 0, deck: deck, theme: settings.theme,
                       flatColor: settings.flatColor, flatCustomHex: settings.flatCustomHex, nowPlaying: np, dim: 0,
-                      speed: settings.spinSpeed, scrubbing: false,
+                      speed: settings.spinSpeed, scrubbing: false, solidBody: true,
                       onArmClick: { store.playPause() }, onRecordClick: { store.openSourceApp() },
                       onSpeedClick: { settings.spinSpeed = $0 })
     }

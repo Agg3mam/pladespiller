@@ -160,7 +160,7 @@ final class TurntableLayer {
 
             let ab = ArmRenderer.bounds(g), pu = ArmRenderer.pivotUnit(g)
             for (rot, img, contents) in [(armRot, armImage, TurntableImages.arm(g, style, scale)),
-                                         (shadowRot, shadowImage, TurntableImages.armShadow(g, scale))] {
+                                         (shadowRot, shadowImage, TurntableImages.armShadow(g, style, scale))] {
                 rot.bounds = .zero
                 rot.position = .zero
                 img.bounds = CGRect(origin: .zero, size: ab.size)
@@ -173,6 +173,7 @@ final class TurntableLayer {
         } else {
             // Flad: armens farve følger lys/mørk tilstand, også uden at målene ændrer sig.
             armImage.contents = TurntableImages.arm(g, style, scale)
+            shadowImage.contents = TurntableImages.armShadow(g, style, scale)
         }
         CATransaction.commit()
     }
