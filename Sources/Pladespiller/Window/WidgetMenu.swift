@@ -60,6 +60,10 @@ final class WidgetMenu {
         for c in ChristmasMode.allCases {
             christmas.addItem(item(c.title, checked: settings.christmas == c) { [settings] in settings.christmas = c })
         }
+        christmas.addItem(.separator())
+        christmas.addItem(item(L("Sne på skrivebordet", "Snow on the desktop"), checked: settings.desktopSnow) { [settings] in
+            settings.desktopSnow.toggle()
+        })
         menu.addItem(submenu(L("Julestemning", "Christmas mood"), christmas))
         menu.addItem(.separator())
 

@@ -196,7 +196,8 @@ struct WidgetView: View {
                         Spacer(minLength: 0)
                     }
                 }
-                .padding(.top, titleTop(Layout.padding))
+                // Julestemning: lyskæden hænger i toppen, så teksten rykker lidt ned under pærerne.
+                .padding(.top, titleTop(Layout.padding) + (settings.christmas.isActive() ? 14 : 0))
                 .padding(.bottom, Layout.padding)
                 .frame(width: c.width, height: body.height, alignment: .topLeading)
                 .environment(\.colorScheme, colors.lightBody ? .light : .dark)

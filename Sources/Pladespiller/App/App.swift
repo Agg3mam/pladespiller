@@ -64,6 +64,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panel: WidgetPanelController?
     /// Ikonet i menulinjen med indstillingerne.
     private var statusItem: StatusItemController?
+    /// Sne på skrivebordet i julestemningen.
+    private var desktopSnow: DesktopSnowController?
 
     init(mock: Bool) {
         store = NowPlayingStore(sources: mock ? [MockNowPlayingSource()] : NowPlayingStore.defaultSources())
@@ -90,6 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.show()
         self.panel = panel
         statusItem = StatusItemController(settings: settings, fullscreen: fullscreen)
+        desktopSnow = DesktopSnowController(settings: settings)
         // `--fullscreen`: åbn fuld skærm ved start (til gennemsyn og test uden at klikke i menuen).
         if CommandLine.arguments.contains("--fullscreen") { fullscreen.show() }
     }

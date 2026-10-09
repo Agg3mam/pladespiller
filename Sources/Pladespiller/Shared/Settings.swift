@@ -155,6 +155,7 @@ final class Settings {
         static let fullscreenScreenID = "pladespiller.fullscreenScreenID"
         static let keepDisplayAwake = "pladespiller.keepDisplayAwake"
         static let christmas = "pladespiller.christmas"
+        static let desktopSnow = "pladespiller.desktopSnow"
         /// Skærmen widgetten sidst stod på (stabilt skærm-id).
         static let lastScreenID = "pladespiller.lastScreenID"
         /// Placering pr. skærm: `placement.<skærm-id>` → `"x,y"` (vinduets øverste venstre hjørne, AppKit-skærmkoordinater).
@@ -176,6 +177,7 @@ final class Settings {
         static let positionLocked = false
         static let spinSpeed: SpinSpeed = .calm
         static let christmas: ChristmasMode = .automatic
+        static let desktopSnow = true
     }
 
     @ObservationIgnored private let defaults: UserDefaults
@@ -198,6 +200,8 @@ final class Settings {
     var keepDisplayAwake: Bool { didSet { defaults.set(keepDisplayAwake, forKey: Key.keepDisplayAwake) } }
     /// Julestemning (sne og lyskæde).
     var christmas: ChristmasMode { didSet { defaults.set(christmas.rawValue, forKey: Key.christmas) } }
+    /// Julestemning: sne på hele skrivebordet (bag vinduer og ikoner), ikke kun i widgetten.
+    var desktopSnow: Bool { didSet { defaults.set(desktopSnow, forKey: Key.desktopSnow) } }
     var lastScreenID: String? { didSet { defaults.set(lastScreenID, forKey: Key.lastScreenID) } }
 
     init(defaults: UserDefaults = .standard) {
@@ -215,6 +219,7 @@ final class Settings {
         fullscreenScreenID = defaults.string(forKey: Key.fullscreenScreenID)
         keepDisplayAwake = defaults.object(forKey: Key.keepDisplayAwake) as? Bool ?? Default.keepDisplayAwake
         christmas = defaults.string(forKey: Key.christmas).flatMap(ChristmasMode.init) ?? Default.christmas
+        desktopSnow = defaults.object(forKey: Key.desktopSnow) as? Bool ?? Default.desktopSnow
         lastScreenID = defaults.string(forKey: Key.lastScreenID)
     }
 
