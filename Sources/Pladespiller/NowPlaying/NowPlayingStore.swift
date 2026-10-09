@@ -90,14 +90,27 @@ final class NowPlayingStore {
         }
         guard !lyricsRequested, np.isPlaying else { return }   // ingen hentning mens intet spiller
         lyricsRequested = true
-        let query = Self.lyricsQuery(np)
+        fetchLyrics(Self.lyricsQuery(np), key: key)
+    }
+
+    /// Henter og prøver igen efter backoff (15 s, 60 s, 5 min) ved midlertidige fejl – kun så længe
+    /// den samme sang vises. Under ventetiden vises `.notFound` (titel + kunstner).
+    private func fetchLyrics(_ query: LyricsService.Query, key: String) {
         Task {
             let result = await self.lyricsService.lyrics(for: query, trackKey: key)
             guard self.lyricsEnabled, self.lyricsTrackKey == key else {
                 NowPlayingLog.log("[lyrics] svar til en sang der ikke længere vises – kasseret")
                 return
             }
-            self.setLyrics(result)
+            switch result {
+            case .done(let state):
+                self.setLyrics(state)
+            case .retry(let delay):
+                self.setLyrics(.notFound)
+                try? await Task.sleep(for: .seconds(delay))
+                guard self.lyricsEnabled, self.lyricsTrackKey == key else { return }   // anden sang nu: opgiv
+                self.fetchLyrics(query, key: key)
+            }
         }
     }
 

@@ -55,7 +55,11 @@ enum NowPlayingDebugCLI {
             // Uden diskcache, så LRCLIB faktisk spørges.
             let service = LyricsService(cache: LyricsCache(directory: nil))
             Task {
-                let state = await service.lyrics(for: q, trackKey: "cli")
+                let lookup = await service.lyrics(for: q, trackKey: "cli")
+                guard case .done(let state) = lookup else {
+                    print("Midlertidig fejl hos LRCLIB (ville prøve igen om 15 s i appen)")
+                    exit(3)
+                }
                 switch state {
                 case .found(let l):
                     if l.instrumental { print("(instrumental)") }

@@ -238,12 +238,20 @@ final class LyricsService {
 
     let cache: LyricsCache
     private let session: URLSession
-    /// Nøgler LRCLIB allerede er spurgt om i denne kørsel (aldrig mere end én gang pr. sang).
-    private var attempted: Set<String> = []
+    /// Nøgler LRCLIB har givet et endeligt svar på i denne kørsel (fundet / ikke fundet).
+    private var answered: Set<String> = []
+    /// Midlertidige fejl (5xx, 429, timeout, netværk) pr. sang i denne kørsel, og hvornår næste forsøg må ske.
+    private var failures: [String: (count: Int, nextAllowed: Date)] = [:]
     private var inFlight: [String: Task<LyricsCacheEntry?, Never>] = [:]
+    /// Til selvtesten: erstatter netværket (nil = midlertidig fejl) og uret.
+    private let fetcher: ((Query) async -> LyricsCacheEntry?)?
+    private let now: () -> Date
 
-    init(cache: LyricsCache = LyricsCache()) {
+    init(cache: LyricsCache = LyricsCache(), fetcher: ((Query) async -> LyricsCacheEntry?)? = nil,
+         now: @escaping () -> Date = { Date() }) {
         self.cache = cache
+        self.fetcher = fetcher
+        self.now = now
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 8
         config.timeoutIntervalForResource = 15
@@ -267,20 +275,59 @@ final class LyricsService {
             .map { Self.state(from: $0, trackKey: trackKey) }
     }
 
-    /// Fra cachen, ellers LRCLIB (højst én gang pr. sang pr. kørsel).
-    func lyrics(for q: Query, trackKey: String) async -> LyricsState {
+    /// Svar på et opslag: færdigt, eller "prøv igen om x s" efter en midlertidig fejl.
+    enum Lookup: Equatable {
+        case done(LyricsState)
+        case retry(after: TimeInterval)
+    }
+
+    /// Ventetid før næste forsøg efter `failures` midlertidige fejl i træk: 15 s, 60 s, 5 min,
+    /// derefter nil (opgiv for denne kørsel). Dvs. højst 3 nye forsøg efter det første.
+    static func retryDelay(afterFailures failures: Int) -> TimeInterval? {
+        let delays: [TimeInterval] = [15, 60, 300]
+        return failures >= 1 && failures <= delays.count ? delays[failures - 1] : nil
+    }
+
+    /// Fra cachen, ellers LRCLIB. Endelige svar hentes én gang pr. sang pr. kørsel; midlertidige fejl
+    /// gemmes ikke på disk og giver `.retry` efter backoff-reglen.
+    func lyrics(for q: Query, trackKey: String) async -> Lookup {
         let key = LyricsCache.key(title: q.title, artist: q.artist, album: q.album, duration: q.duration)
-        if let e = cache.entry(for: key) { return Self.state(from: e, trackKey: trackKey) }
-        if let task = inFlight[key] { return (await task.value).map { Self.state(from: $0, trackKey: trackKey) } ?? .notFound }
-        guard !attempted.contains(key) else { return .notFound }
-        attempted.insert(key)
-        let task = Task<LyricsCacheEntry?, Never> { await self.fetch(q) }
-        inFlight[key] = task
-        let entry = await task.value
-        inFlight[key] = nil
-        guard let entry else { return .notFound }      // netværksfejl: ikke på disk, men heller ikke igen i denne kørsel
-        cache.store(entry, for: key)
-        return Self.state(from: entry, trackKey: trackKey)
+        if let e = cache.entry(for: key) { return .done(Self.state(from: e, trackKey: trackKey)) }
+        if answered.contains(key) { return .done(.notFound) }
+        if let f = failures[key] {
+            guard Self.retryDelay(afterFailures: f.count) != nil else { return .done(.notFound) }   // opgivet
+            let wait = f.nextAllowed.timeIntervalSince(now())
+            if wait > 0 { return .retry(after: wait) }
+        }
+        let entry: LyricsCacheEntry?
+        if let task = inFlight[key] {
+            entry = await task.value
+        } else {
+            let task = Task<LyricsCacheEntry?, Never> {
+                if let fetcher = self.fetcher { return await fetcher(q) }
+                return await self.fetch(q)
+            }
+            inFlight[key] = task
+            entry = await task.value
+            inFlight[key] = nil
+            if let entry {
+                answered.insert(key)
+                failures[key] = nil
+                cache.store(entry, for: key)
+            } else {
+                let count = (failures[key]?.count ?? 0) + 1
+                let delay = Self.retryDelay(afterFailures: count)
+                failures[key] = (count, now().addingTimeInterval(delay ?? 0))
+                NowPlayingLog.log("[lyrics] midlertidig fejl nr. \(count) for “\(q.title)” – "
+                    + (delay.map { "prøver igen om \(Int($0)) s" } ?? "opgiver i denne kørsel"))
+            }
+        }
+        guard let entry else {
+            let f = failures[key]
+            guard let f, Self.retryDelay(afterFailures: f.count) != nil else { return .done(.notFound) }
+            return .retry(after: max(0, f.nextAllowed.timeIntervalSince(now())))
+        }
+        return .done(Self.state(from: entry, trackKey: trackKey))
     }
 
     static func state(from e: LyricsCacheEntry, trackKey: String) -> LyricsState {
@@ -313,10 +360,7 @@ final class LyricsService {
             case .failure: hadError = true
             }
         }
-        if hadError {
-            NowPlayingLog.log("[lyrics] fejl ved hentning af “\(q.title)” – prøver ikke igen i denne kørsel")
-            return nil
-        }
+        if hadError { return nil }   // midlertidig fejl: backoff i `lyrics(for:)`
         return log(LyricsCacheEntry(synced: nil, fetched: .now), q, t0)
     }
 
@@ -352,7 +396,14 @@ final class LyricsService {
         }
     }
 
-    struct HTTPError: Error {}
+    /// HTTP-fejl der ikke er 404 og ikke 2xx. Kun 5xx og 429 regnes for midlertidige.
+    struct HTTPError: Error { var status: Int }
+
+    /// Midlertidig fejl (prøv igen senere): 5xx, 429, timeout og andre netværksfejl.
+    static func isTransient(_ error: Error) -> Bool {
+        if let h = error as? HTTPError { return h.status >= 500 || h.status == 429 }
+        return true   // URLError (timeout, ingen forbindelse …)
+    }
 
     /// `/api/get`: success(nil) ved 404 eller når der kun er plainLyrics.
     private func get(title: String, artist: String, album: String, duration: TimeInterval) async -> Result<LyricsMatching.Candidate?, Error> {
@@ -381,17 +432,23 @@ final class LyricsService {
     /// success(nil) ved 404.
     private func request(_ endpoint: String, _ items: [URLQueryItem]) async -> Result<Data?, Error> {
         guard var comps = URLComponents(url: Self.baseURL.appendingPathComponent(endpoint), resolvingAgainstBaseURL: false) else {
-            return .failure(HTTPError())
+            return .success(nil)
         }
         comps.queryItems = items
-        guard let url = comps.url else { return .failure(HTTPError()) }
+        guard let url = comps.url else { return .success(nil) }
         do {
             let (data, response) = try await session.data(from: url)
             let code = (response as? HTTPURLResponse)?.statusCode ?? 0
             if code == 404 { return .success(nil) }
-            guard (200..<300).contains(code) else { return .failure(HTTPError()) }
+            guard (200..<300).contains(code) else {
+                let e = HTTPError(status: code)
+                NowPlayingLog.log("[lyrics] LRCLIB svarede \(code) på /\(endpoint)")
+                // Andre 4xx (fx 400) behandles som "ikke fundet".
+                return Self.isTransient(e) ? .failure(e) : .success(nil)
+            }
             return .success(data)
         } catch {
+            NowPlayingLog.log("[lyrics] netværksfejl på /\(endpoint): \(error.localizedDescription)")
             return .failure(error)
         }
     }

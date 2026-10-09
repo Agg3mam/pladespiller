@@ -226,6 +226,49 @@ enum NowPlayingSelfTest {
         expect(c2.entry(for: "gammel") == nil && c2.entry(for: "ny")?.isNotFound == true, "“Ikke fundet” gælder i 7 dage")
         expect(c1.memoryKeys.count == 2, "Hukommelses-cache er begrænset")
 
+        // Backoff ved midlertidige fejl (5xx/timeout/netværk): 15 s, 60 s, 5 min, så opgiv
+        expect(LyricsService.retryDelay(afterFailures: 1) == 15 && LyricsService.retryDelay(afterFailures: 2) == 60
+               && LyricsService.retryDelay(afterFailures: 3) == 300 && LyricsService.retryDelay(afterFailures: 4) == nil,
+               "Backoff: 15 s, 60 s, 5 min, derefter opgiv")
+        expect(LyricsService.isTransient(LyricsService.HTTPError(status: 503)) && LyricsService.isTransient(LyricsService.HTTPError(status: 429))
+               && !LyricsService.isTransient(LyricsService.HTTPError(status: 400)) && LyricsService.isTransient(URLError(.timedOut)),
+               "Midlertidig: 5xx, 429, timeout – ikke 400")
+        var clock = Date(timeIntervalSince1970: 1_000_000)
+        var calls = 0
+        var failNext = 10
+        let flaky = LyricsService(cache: LyricsCache(directory: nil), fetcher: { _ in
+            calls += 1
+            if failNext > 0 { failNext -= 1; return nil }
+            return LyricsCacheEntry(synced: "[00:01.00]Hej", fetched: Date())
+        }, now: { clock })
+        let fq = LyricsService.Query(title: "Flaky", artist: "Band", album: "", duration: 100)
+        func lookup() -> LyricsService.Lookup? {
+            var r: LyricsService.Lookup?
+            Task { r = await flaky.lyrics(for: fq, trackKey: "f") }
+            let t = Date()
+            while r == nil, Date().timeIntervalSince(t) < 2 { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+            return r
+        }
+        expect(lookup() == .retry(after: 15) && calls == 1, "Fejl 1 → prøv igen om 15 s")
+        clock += 5
+        expect(lookup() == .retry(after: 10) && calls == 1, "For tidligt → intet kald, vent resten")
+        clock += 10
+        expect(lookup() == .retry(after: 60) && calls == 2, "Fejl 2 → 60 s")
+        clock += 60
+        expect(lookup() == .retry(after: 300) && calls == 3, "Fejl 3 → 5 min")
+        clock += 300
+        expect(lookup() == .done(.notFound) && calls == 4, "Fejl 4 → opgiv (højst 3 nye forsøg)")
+        clock += 3600
+        expect(lookup() == .done(.notFound) && calls == 4, "Opgivet → ingen flere kald i denne kørsel")
+        failNext = 1
+        let fq2 = LyricsService.Query(title: "Flaky2", artist: "Band", album: "", duration: 100)
+        var r2: LyricsService.Lookup?
+        Task { _ = await flaky.lyrics(for: fq2, trackKey: "g"); clock += 15; r2 = await flaky.lyrics(for: fq2, trackKey: "g") }
+        let t2 = Date()
+        while r2 == nil, Date().timeIntervalSince(t2) < 2 { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        if case .done(.found(let l))? = r2 { expect(l.lines.first?.text == "Hej", "Lykkes efter én fejl → fundet")
+        } else { expect(false, "Lykkes efter én fejl → fundet") }
+
         // Store: sangtekst følger sang og indstilling (testkilden spørger aldrig LRCLIB)
         let lyricsSource = FakeSource(id: NowPlaying.BundleID.mock)
         let lyricsStore = NowPlayingStore(sources: [lyricsSource])
