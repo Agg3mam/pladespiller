@@ -6,9 +6,9 @@ enum WidgetSize: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .small: "Lille"
-        case .medium: "Mellem"
-        case .large: "Stor"
+        case .small: L("Lille", "Small")
+        case .medium: L("Mellem", "Medium")
+        case .large: L("Stor", "Large")
         }
     }
 }
@@ -18,10 +18,10 @@ enum TurntableTheme: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .flat: "Flad"
-        case .wood: "Træ"
+        case .flat: L("Flad", "Flat")
+        case .wood: L("Træ", "Wood")
         case .aluminium: "Aluminium"
-        case .black: "Sort"
+        case .black: L("Sort", "Black")
         case .auto: "Auto"
         }
     }
@@ -32,9 +32,9 @@ enum ColorMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .automatic: "Automatisk"
-        case .alwaysFull: "Altid fuld farve"
-        case .alwaysDimmed: "Altid dæmpet"
+        case .automatic: L("Automatisk", "Automatic")
+        case .alwaysFull: L("Altid fuld farve", "Always full color")
+        case .alwaysDimmed: L("Altid dæmpet", "Always dimmed")
         }
     }
 }
@@ -45,10 +45,10 @@ enum SpinSpeed: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .slow: "Langsom"
-        case .calm: "Rolig"
-        case .rpm33: "33⅓ o/min (ægte)"
-        case .rpm45: "45 o/min"
+        case .slow: L("Langsom", "Slow")
+        case .calm: L("Rolig", "Calm")
+        case .rpm33: L("33⅓ o/min (ægte)", "33⅓ rpm (real)")
+        case .rpm45: L("45 o/min", "45 rpm")
         }
     }
     /// Sekunder pr. omgang.
@@ -70,18 +70,18 @@ enum FlatColor: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .auto: "Auto (fra coveret)"
-        case .yellow: "Gul"
+        case .auto: L("Auto (fra coveret)", "Auto (from cover)")
+        case .yellow: L("Gul", "Yellow")
         case .orange: "Orange"
-        case .red: "Rød"
+        case .red: L("Rød", "Red")
         case .pink: "Pink"
-        case .purple: "Lilla"
-        case .blue: "Blå"
-        case .teal: "Turkis"
-        case .green: "Grøn"
-        case .black: "Sort"
-        case .white: "Hvid"
-        case .custom: "Vælg farve…"
+        case .purple: L("Lilla", "Purple")
+        case .blue: L("Blå", "Blue")
+        case .teal: L("Turkis", "Teal")
+        case .green: L("Grøn", "Green")
+        case .black: L("Sort", "Black")
+        case .white: L("Hvid", "White")
+        case .custom: L("Vælg farve…", "Choose color…")
         }
     }
     /// sRGB-hex for de faste farver. Nil for `.auto` (fra coveret) og `.custom` (se `Settings.flatCustomHex`).
@@ -108,8 +108,8 @@ enum FullscreenLayout: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .lyrics: "Med sangtekst"
-        case .turntable: "Kun pladespiller"
+        case .lyrics: L("Med sangtekst", "With lyrics")
+        case .turntable: L("Kun pladespiller", "Turntable only")
         }
     }
 }

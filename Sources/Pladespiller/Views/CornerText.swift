@@ -76,7 +76,7 @@ struct CornerText: View {
                     }
                 }
             } else if size != .small {
-                Text("Intet spiller")
+                Text(L("Intet spiller", "Nothing playing"))
                     .font(.system(size: titleSize, weight: .bold))
                     .foregroundStyle(Color(nsColor: colors.title).opacity(0.55))
                     .probe("titel")

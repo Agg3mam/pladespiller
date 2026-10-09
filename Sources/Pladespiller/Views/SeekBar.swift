@@ -77,8 +77,8 @@ struct SeekBar: View {
         .overlay { if canSeek { hitArea } }
         .animation(.easeOut(duration: 0.12), value: active)
         .accessibilityElement()
-        .accessibilityLabel("Fremdrift")
-        .accessibilityValue("\(formatTime(np.position(at: .now))) af \(formatTime(np.duration))")
+        .accessibilityLabel(L("Fremdrift", "Progress"))
+        .accessibilityValue("\(formatTime(np.position(at: .now))) \(L("af", "of")) \(formatTime(np.duration))")
         .accessibilityAdjustableAction { direction in
             guard canSeek else { return }
             let step: TimeInterval = direction == .increment ? 10 : -10

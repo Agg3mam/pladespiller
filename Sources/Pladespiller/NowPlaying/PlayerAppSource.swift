@@ -342,8 +342,8 @@ class PlayerAppSource: NowPlayingSource, AccessReporting {
     }
 
     /// Korte tekster til widgetten (højst 2 korte linjer i Lille); den lange forklaring står i loggen (QA N7).
-    static func askingMessage(_ app: String) -> String { "Tillad adgang til \(app)" }
-    static func deniedMessage(_ app: String) -> String { "Ingen adgang til \(app) · Åbn Indstillinger" }
+    static func askingMessage(_ app: String) -> String { L("Tillad adgang til \(app)", "Allow access to \(app)") }
+    static func deniedMessage(_ app: String) -> String { L("Ingen adgang til \(app) · Åbn Indstillinger", "No access to \(app) · Open Settings") }
 
     private func setAccessProblem(_ message: String?) {
         let p = message.map { SourceAccessProblem(bundleID: bundleID, message: $0) }

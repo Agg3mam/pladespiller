@@ -63,13 +63,13 @@ struct TurntableView: View {
         .frame(width: size.width, height: size.height)
         .accessibilityElement()
         .accessibilityLabel(accessibilityText)
-        .accessibilityAction(named: nowPlaying?.isPlaying == true ? "Pause" : "Afspil", onArmClick)
-        .accessibilityAction(named: "Åbn musikappen", onRecordClick)
+        .accessibilityAction(named: nowPlaying?.isPlaying == true ? "Pause" : L("Afspil", "Play"), onArmClick)
+        .accessibilityAction(named: L("Åbn musikappen", "Open the music app"), onRecordClick)
     }
 
     private var accessibilityText: String {
-        guard let np = nowPlaying else { return "Pladespiller. Intet spiller" }
-        return "Pladespiller. \(np.isPlaying ? "Spiller" : "På pause"): \(TrackStrings.title(np)) af \(TrackStrings.artist(np))"
+        guard let np = nowPlaying else { return L("Pladespiller. Intet spiller", "Turntable. Nothing playing") }
+        return L("Pladespiller", "Turntable") + ". \(np.isPlaying ? L("Spiller", "Playing") : L("På pause", "Paused")): \(TrackStrings.title(np)) \(L("af", "by")) \(TrackStrings.artist(np))"
     }
 }
 

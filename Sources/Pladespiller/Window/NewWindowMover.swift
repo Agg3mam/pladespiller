@@ -86,14 +86,18 @@ final class NewWindowMover {
         let previous = NSWorkspace.shared.frontmostApplication
         NSApp.activate()
         let alert = NSAlert()
-        alert.messageText = "Pladespiller skal have adgang til Tilgængelighed"
-        alert.informativeText = """
+        alert.messageText = L("Pladespiller skal have adgang til Tilgængelighed", "Pladespiller needs Accessibility access")
+        alert.informativeText = L("""
             For at flytte nye vinduer væk fra fuld skærm-skærmen skal Pladespiller have lov til at \
             flytte vinduer. Slå Pladespiller til under Anonymitet og sikkerhed ▸ Tilgængelighed. \
             Fuld skærm virker også uden.
-            """
-        alert.addButton(withTitle: "Åbn Systemindstillinger")
-        alert.addButton(withTitle: "Ikke nu")
+            """, """
+            To move new windows away from the full screen display, Pladespiller needs permission to \
+            move windows. Turn Pladespiller on under Privacy & Security ▸ Accessibility. \
+            Full screen also works without it.
+            """)
+        alert.addButton(withTitle: L("Åbn Systemindstillinger", "Open System Settings"))
+        alert.addButton(withTitle: L("Ikke nu", "Not now"))
         if alert.runModal() == .alertFirstButtonReturn {
             // Sørger for, at Pladespiller står på listen (uden systemets egen dialog oveni).
             _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": false] as CFDictionary)

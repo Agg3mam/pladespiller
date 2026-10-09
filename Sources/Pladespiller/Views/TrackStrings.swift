@@ -4,13 +4,13 @@ import AppKit
 enum TrackStrings {
     static func title(_ np: NowPlaying) -> String {
         let t = np.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return t.isEmpty ? "Ukendt titel" : t
+        return t.isEmpty ? L("Ukendt titel", "Unknown title") : t
     }
 
     static func artist(_ np: NowPlaying) -> String {
         let a = np.artist.trimmingCharacters(in: .whitespacesAndNewlines)
         if !a.isEmpty { return a }
-        return SourceApp.name(for: np.sourceAppBundleID) ?? "Ukendt kunstner"
+        return SourceApp.name(for: np.sourceAppBundleID) ?? L("Ukendt kunstner", "Unknown artist")
     }
 
     static func album(_ np: NowPlaying) -> String? {
@@ -66,7 +66,7 @@ enum SourceApp {
 
     static func name(for bundleID: String) -> String? {
         if let hit = names[bundleID] { return hit }
-        let known: [String: String] = [NowPlaying.BundleID.spotify: "Spotify", NowPlaying.BundleID.music: "Musik"]
+        let known: [String: String] = [NowPlaying.BundleID.spotify: "Spotify", NowPlaying.BundleID.music: L("Musik", "Music")]
         if let k = known[bundleID] { names[bundleID] = k; return k }
         guard let url = url(for: bundleID) else { return nil }
         let n = FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")

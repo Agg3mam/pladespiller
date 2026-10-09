@@ -16,7 +16,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         if let button = item.button {
             button.image = Self.icon
             button.toolTip = "Pladespiller"
-            button.setAccessibilityLabel("Pladespiller-indstillinger")
+            button.setAccessibilityLabel(L("Pladespiller-indstillinger", "Pladespiller settings"))
         }
         menu.delegate = self
         item.menu = menu

@@ -134,7 +134,7 @@ struct FullscreenView: View {
                         .offset(x: x)
                 }
             } else {
-                Text("Intet spiller")
+                Text(L("Intet spiller", "Nothing playing"))
                     .font(.system(size: u * 72, weight: .bold))
                     .foregroundStyle(Color(nsColor: colors.title).opacity(0.55))
                     .frame(width: width, height: size.height, alignment: .leading)
@@ -191,7 +191,7 @@ struct FullscreenView: View {
                         .lineLimit(1)
                 }
             } else {
-                Text("Intet spiller")
+                Text(L("Intet spiller", "Nothing playing"))
                     .font(.system(size: u * 54, weight: .bold))
                     .foregroundStyle(Color(nsColor: colors.title).opacity(0.55))
             }

@@ -88,7 +88,7 @@ struct WidgetView: View {
             .overlay(alignment: .bottomLeading) {
                 Group {
                     if np == nil, problem == nil {
-                        StatusCapsule(text: "Intet spiller", warning: false)
+                        StatusCapsule(text: L("Intet spiller", "Nothing playing"), warning: false)
                     } else if problem == nil, presentation.isHovering, let np {
                         HoverPlayButton(isPlaying: np.isPlaying, action: actions.playPause)
                             .transition(.opacity)
@@ -164,7 +164,7 @@ struct WidgetView: View {
             .overlay(alignment: .bottomTrailing) {
                 Group {
                     if np == nil, problem == nil {
-                        StatusCapsule(text: "Intet spiller", warning: false)
+                        StatusCapsule(text: L("Intet spiller", "Nothing playing"), warning: false)
                     } else if problem == nil, presentation.isHovering, let np {
                         HoverPlayButton(isPlaying: np.isPlaying, action: actions.playPause).transition(.opacity)
                     }
@@ -236,7 +236,7 @@ struct WidgetView: View {
                     } else {
                         TrackText(np: nil, problem: problem, width: inner, centered: true, actions: actions)
                         if problem == nil {
-                            Text("Start musik i Spotify eller Musik")
+                            Text(L("Start musik i Spotify eller Musik", "Start music in Spotify or Music"))
                                 .font(.system(size: Layout.tertiarySize))
                                 .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity)
@@ -318,10 +318,10 @@ struct TrackText: View {
                     }
                 }
             } else {
-                Text("Intet spiller")
+                Text(L("Intet spiller", "Nothing playing"))
                     .font(.system(size: Layout.titleSize, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .padding(.leading, centered ? 0 : -Layout.leadingBearing("Intet", font: Layout.titleFont()))
+                    .padding(.leading, centered ? 0 : -Layout.leadingBearing(L("Intet", "Nothing"), font: Layout.titleFont()))
                     .probe("titel")
                 if let problem {
                     ProblemText(message: problem.message, size: Layout.secondarySize - 1, action: actions.openSettings).layoutPriority(1)
@@ -387,7 +387,7 @@ struct TransportRow: View {
 
     var body: some View {
         HStack(spacing: spread ? 0 : 30) {
-            glyphButton("backward.fill", label: "Forrige", action: actions.previous).probe("forrige")
+            glyphButton("backward.fill", label: L("Forrige", "Previous"), action: actions.previous).probe("forrige")
             if spread { Spacer(minLength: 0) }
             Button(action: actions.playPause) {
                 ZStack {
@@ -398,10 +398,10 @@ struct TransportRow: View {
                 .frame(width: Layout.playDiameter, height: Layout.playDiameter)
                 .contentShape(Circle())
             }
-            .accessibilityLabel(isPlaying ? "Pause" : "Afspil")
+            .accessibilityLabel(isPlaying ? "Pause" : L("Afspil", "Play"))
             .probe("afspil")
             if spread { Spacer(minLength: 0) }
-            glyphButton("forward.fill", label: "Næste", action: actions.next).probe("næste")
+            glyphButton("forward.fill", label: L("Næste", "Next"), action: actions.next).probe("næste")
         }
         .buttonStyle(WidgetButtonStyle())
         .foregroundStyle(.primary)
@@ -443,7 +443,7 @@ struct HoverPlayButton: View {
                 .contentShape(Circle())
         }
         .buttonStyle(WidgetButtonStyle())
-        .accessibilityLabel(isPlaying ? "Pause" : "Afspil")
+        .accessibilityLabel(isPlaying ? "Pause" : L("Afspil", "Play"))
     }
 }
 
@@ -492,7 +492,7 @@ struct SourceIcon: View {
             }
         }
         .buttonStyle(WidgetButtonStyle())
-        .accessibilityLabel("Åbn \(SourceApp.name(for: bundleID) ?? "musikappen")")
+        .accessibilityLabel(L("Åbn ", "Open ") + (SourceApp.name(for: bundleID) ?? L("musikappen", "the music app")))
     }
 }
 

@@ -25,7 +25,7 @@ final class FlatColorPicker: NSObject {
         panel.color = NSColor(hex: settings.flatCustomHex) ?? .systemYellow
         panel.setTarget(self)
         panel.setAction(#selector(colorChanged(_:)))
-        panel.title = "Farve til Flad"
+        panel.title = L("Farve til Flad", "Color for Flat")
         panel.level = .floating
 
         if closeObserver == nil {

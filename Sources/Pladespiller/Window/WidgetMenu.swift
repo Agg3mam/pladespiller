@@ -41,31 +41,31 @@ final class WidgetMenu {
         for t in TurntableTheme.allCases {
             theme.addItem(item(t.title, checked: settings.theme == t) { [settings] in settings.theme = t })
         }
-        menu.addItem(submenu("Tema", theme))
-        menu.addItem(submenu("Farve", flatColorMenu()))
+        menu.addItem(submenu(L("Tema", "Theme"), theme))
+        menu.addItem(submenu(L("Farve", "Color"), flatColorMenu()))
 
         let speed = NSMenu()
         for v in SpinSpeed.allCases {
             speed.addItem(item(v.title, checked: settings.spinSpeed == v) { [settings] in settings.spinSpeed = v })
         }
-        menu.addItem(submenu("Hastighed", speed))
+        menu.addItem(submenu(L("Hastighed", "Speed"), speed))
 
         let colors = NSMenu()
         for c in ColorMode.allCases {
             colors.addItem(item(c.title, checked: settings.colorMode == c) { [settings] in settings.colorMode = c })
         }
-        menu.addItem(submenu("Dæmpning", colors))
+        menu.addItem(submenu(L("Dæmpning", "Dimming"), colors))
         menu.addItem(.separator())
 
-        menu.addItem(item("Vis knapper og tekst", checked: settings.showControls) { [settings] in
+        menu.addItem(item(L("Vis knapper og tekst", "Show controls and text"), checked: settings.showControls) { [settings] in
             settings.showControls.toggle()
         })
-        let lyrics = item("Vis sangtekst", checked: settings.showLyrics) { [settings] in
+        let lyrics = item(L("Vis sangtekst", "Show lyrics"), checked: settings.showLyrics) { [settings] in
             settings.showLyrics.toggle()
         }
-        lyrics.toolTip = "Henter fra LRCLIB på nettet"
+        lyrics.toolTip = L("Henter fra LRCLIB på nettet", "Fetched from LRCLIB online")
         menu.addItem(lyrics)
-        menu.addItem(note("Henter fra LRCLIB på nettet"))
+        menu.addItem(note(L("Henter fra LRCLIB på nettet", "Fetched from LRCLIB online")))
         menu.addItem(.separator())
 
         if let fullscreen {
@@ -73,15 +73,20 @@ final class WidgetMenu {
             menu.addItem(.separator())
         }
 
-        menu.addItem(item("Lås placering", checked: settings.positionLocked) { [settings] in
+        let language = NSMenu()
+        for c in LanguageChoice.allCases {
+            language.addItem(item(c.title, checked: AppLanguage.shared.choice == c) { AppLanguage.shared.choice = c })
+        }
+        menu.addItem(submenu(L("Sprog", "Language"), language))
+        menu.addItem(item(L("Lås placering", "Lock position"), checked: settings.positionLocked) { [settings] in
             settings.positionLocked.toggle()
         })
-        let login = item("Åbn ved login", checked: LoginItem.isEnabled) { LoginItem.toggle() }
+        let login = item(L("Åbn ved login", "Open at login"), checked: LoginItem.isEnabled) { LoginItem.toggle() }
         if LoginItem.needsApproval { login.state = .mixed }   // afventer godkendelse i Systemindstillinger
         menu.addItem(login)
         menu.addItem(.separator())
 
-        menu.addItem(item("Fjern widget", checked: false) {
+        menu.addItem(item(L("Fjern widget", "Remove widget"), checked: false) {
             // Efter menuens sporingsløkke, ikke inde i den.
             DispatchQueue.main.async { MainActor.assumeIsolated { RemoveWidget.confirmAndRemove() } }
         })
@@ -90,11 +95,11 @@ final class WidgetMenu {
 
     /// Fuld skærm, Fuld skærm-visning ▸, Fuld skærm-skærm ▸ (kun ved flere skærme), Hold skærmen tændt.
     private func addFullscreenItems(to menu: NSMenu, _ fullscreen: FullscreenController) {
-        let toggle = item("Fuld skærm", checked: fullscreen.isShowing) { [weak fullscreen] in
+        let toggle = item(L("Fuld skærm", "Full screen"), checked: fullscreen.isShowing) { [weak fullscreen] in
             // Efter menuens sporingsløkke.
             DispatchQueue.main.async { MainActor.assumeIsolated { fullscreen?.toggle() } }
         }
-        toggle.toolTip = "Esc lukker"
+        toggle.toolTip = L("Esc lukker", "Esc closes")
         menu.addItem(toggle)
 
         let layout = NSMenu()
@@ -103,12 +108,12 @@ final class WidgetMenu {
                 settings.fullscreenLayout = l
             })
         }
-        menu.addItem(submenu("Fuld skærm-visning", layout))
+        menu.addItem(submenu(L("Fuld skærm-visning", "Full screen view"), layout))
 
         let list = screens()
         if list.count > 1 {
             let sm = NSMenu()
-            sm.addItem(item("Automatisk", checked: settings.fullscreenScreenID == nil) { [settings] in
+            sm.addItem(item(L("Automatisk", "Automatic"), checked: settings.fullscreenScreenID == nil) { [settings] in
                 settings.fullscreenScreenID = nil
             })
             sm.addItem(.separator())
@@ -117,19 +122,19 @@ final class WidgetMenu {
                     settings.fullscreenScreenID = s.id
                 })
             }
-            menu.addItem(submenu("Fuld skærm-skærm", sm))
+            menu.addItem(submenu(L("Fuld skærm-skærm", "Full screen display"), sm))
         }
 
-        menu.addItem(item("Hold skærmen tændt", checked: settings.keepDisplayAwake) { [settings] in
+        menu.addItem(item(L("Hold skærmen tændt", "Keep display awake"), checked: settings.keepDisplayAwake) { [settings] in
             settings.keepDisplayAwake.toggle()
         })
-        let move = item("Flyt nye vinduer væk", checked: fullscreen.movesNewWindows) { [weak fullscreen] in
+        let move = item(L("Flyt nye vinduer væk", "Move new windows away"), checked: fullscreen.movesNewWindows) { [weak fullscreen] in
             // Efter menuens sporingsløkke (kan vise en forklaring om Tilgængelighed).
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { fullscreen.map { $0.movesNewWindows.toggle() } }
             }
         }
-        move.toolTip = "Nye vinduer på fuld skærm-skærmen flyttes til din arbejdsskærm (kræver Tilgængelighed)"
+        move.toolTip = L("Nye vinduer på fuld skærm-skærmen flyttes til din arbejdsskærm (kræver Tilgængelighed)", "New windows on the full screen display are moved to your work display (requires Accessibility)")
         menu.addItem(move)
     }
 
@@ -256,10 +261,10 @@ enum RemoveWidget {
         NSApp.activate()
         let alert = NSAlert()
         alert.alertStyle = .informational
-        alert.messageText = "Fjern Pladespiller fra skrivebordet?"
-        alert.informativeText = "Den åbner ikke længere ved login."
-        alert.addButton(withTitle: "Fjern")
-        alert.addButton(withTitle: "Annuller").keyEquivalent = "\u{1b}"
+        alert.messageText = L("Fjern Pladespiller fra skrivebordet?", "Remove Pladespiller from the desktop?")
+        alert.informativeText = L("Den åbner ikke længere ved login.", "It will no longer open at login.")
+        alert.addButton(withTitle: L("Fjern", "Remove"))
+        alert.addButton(withTitle: L("Annuller", "Cancel")).keyEquivalent = "\u{1b}"
         alert.window.level = .modalPanel
         guard alert.runModal() == .alertFirstButtonReturn else {
             if let previous, previous != NSRunningApplication.current { previous.activate() }

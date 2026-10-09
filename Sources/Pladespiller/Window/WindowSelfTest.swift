@@ -123,7 +123,7 @@ enum WindowSelfTest {
             print("     menu:", titles.joined(separator: " | "))
             check("menupunkter", titles == ["Lille", "Mellem", "Stor", "—", "Tema", "Farve", "Hastighed", "Dæmpning", "—",
                                             "Vis knapper og tekst", "Vis sangtekst", "Henter fra LRCLIB på nettet", "—",
-                                            "Lås placering", "Åbn ved login", "—", "Fjern widget"], "\(titles)")
+                                            "Sprog", "Lås placering", "Åbn ved login", "—", "Fjern widget"], "\(titles)")
             check("flueben ved Stor", menu.item(withTitle: "Stor")?.state == .on && menu.item(withTitle: "Lille")?.state == .off)
             let tema = menu.item(withTitle: "Tema")?.submenu
             check("Tema-undermenu", tema?.items.map(\.title) == ["Flad", "Træ", "Aluminium", "Sort", "Auto"]
