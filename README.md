@@ -21,17 +21,30 @@ Fortryder du en tilladelse, kan du ændre den i Systemindstillinger ▸ Anonymit
 
 - **Træk** widgetten for at flytte den. Den falder på plads i gitteret.
 - **Klik på armen:** afspil/pause. **Klik på pladen:** åbn musikappen.
-- **Knapperne** forrige, afspil/pause og næste findes i størrelserne Mellem og Stor.
-- **Spol:** klik eller træk på fremdriftslinjen (Mellem og Stor).
-- **Hastighed:** klik på 33 eller 45 på pladespilleren, eller vælg i menuen.
-- **Højreklik** åbner menuen:
+- **Sangtekst:** står i hjørnet og følger sangen linje for linje. Teksterne hentes fra [LRCLIB](https://lrclib.net). Kun sangens titel og kunstner sendes dertil. Kan slås fra i menuen.
+- **Knapper og tekst** (slås til i menuen): titel, kunstner, fremdrift med tider og forrige/afspil/næste. I Stor kommer knapperne frem, når musen er over widgetten.
+- **Spol:** klik eller træk på fremdriftslinjen.
+- **Menu:** højreklik på widgetten eller klik på ikonet med pladen i **menulinjen**:
   - Lille / Mellem / Stor
-  - Tema: Træ, Aluminium, Sort eller Auto (farven hentes fra coveret)
+  - Tema: Flad, Træ, Aluminium, Sort eller Auto (farven hentes fra coveret)
+  - Farve (til Flad): Auto fra coveret, ti faste farver eller "Vælg farve…"
   - Hastighed: Langsom, Rolig, 33⅓ eller 45 o/min
-  - Farver
-  - Lås placering
-  - Åbn ved login
-  - Fjern widget
+  - Dæmpning: følger Apples widgetstil, eller altid fuld farve/dæmpet
+  - Vis knapper og tekst, Vis sangtekst
+  - Fuld skærm (se nedenfor)
+  - Sprog: Dansk, English eller Automatisk (som Macen)
+  - Lås placering, Åbn ved login, Fjern widget
+
+I temaet Flad er armen hvid, når macOS står i lys tilstand, og sort i mørk tilstand. I de andre temaer er armen en lille 3D-model med ægte metal og lys.
+
+## Fuld skærm
+
+Vælg **Fuld skærm** i menuen. Pladespilleren vises stor på din ekstra skærm, med sangteksten ved siden af eller alene (menu ▸ Fuld skærm-visning).
+
+- Den ligger som en levende baggrund: dine vinduer ligger foran, og menulinjen på den skærm skjules.
+- Cursoren forsvinder efter 3 sekunder, og skærmen holdes tændt, mens der spilles.
+- **Esc** lukker fuld skærm.
+- Med **Flyt nye vinduer væk** flyttes nye vinduer, der åbner på fuld skærm-skærmen, over på din arbejdsskærm. Det kræver adgangen **Tilgængelighed** (Systemindstillinger ▸ Anonymitet og sikkerhed ▸ Tilgængelighed). Appen spørger først, når du bruger funktionen.
 
 ## Afinstallér
 
