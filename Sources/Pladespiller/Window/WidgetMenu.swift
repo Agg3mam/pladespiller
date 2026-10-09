@@ -123,6 +123,14 @@ final class WidgetMenu {
         menu.addItem(item("Hold skærmen tændt", checked: settings.keepDisplayAwake) { [settings] in
             settings.keepDisplayAwake.toggle()
         })
+        let move = item("Flyt nye vinduer væk", checked: fullscreen.movesNewWindows) { [weak fullscreen] in
+            // Efter menuens sporingsløkke (kan vise en forklaring om Tilgængelighed).
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { fullscreen.map { $0.movesNewWindows.toggle() } }
+            }
+        }
+        move.toolTip = "Nye vinduer på fuld skærm-skærmen flyttes til din arbejdsskærm (kræver Tilgængelighed)"
+        menu.addItem(move)
     }
 
     /// Farve ▸ til temaet Flad. Altid aktiv: vælger man en farve, skifter temaet til Flad, så valget

@@ -204,6 +204,28 @@ enum WindowSelfTest {
                   && FullscreenWindow.windowLevel.rawValue < NSWindow.Level.normal.rawValue)
             check("fuld skærm-collectionBehavior", FullscreenWindow.behavior == [.canJoinAllSpaces, .stationary, .ignoresCycle])
 
+            // Flyt nye vinduer (CG-koordinater). Hovedskærm 1710×1112 til venstre, fuld skærm 2560×1440 til højre.
+            typealias M = NewWindowMover
+            let main = CGRect(x: 0, y: 0, width: 1710, height: 1112), mainVis = CGRect(x: 0, y: 38, width: 1710, height: 1074)
+            let fsScreen = CGRect(x: 1710, y: 0, width: 2560, height: 1440), fsVis = CGRect(x: 1710, y: 30, width: 2560, height: 1410)
+            check("helt på skærmen = 1", M.fractionOnScreen(CGRect(x: 2000, y: 200, width: 800, height: 600), screen: fsScreen) == 1)
+            check("ikke på skærmen = 0", M.fractionOnScreen(CGRect(x: 100, y: 200, width: 800, height: 600), screen: fsScreen) == 0)
+            let straddle = CGRect(x: 1510, y: 200, width: 800, height: 600)   // 600 af 800 på fuld skærm
+            check("75 % på fuld skærm", abs(M.fractionOnScreen(straddle, screen: fsScreen) - 0.75) < 0.0001)
+            check("præcis halvdelen tæller ikke (> 50 %)", !(M.fractionOnScreen(CGRect(x: 1310, y: 0, width: 800, height: 600), screen: fsScreen) > 0.5))
+            _ = main
+            let centered = CGRect(x: 1710 + 1280 - 400, y: 30 + 705 - 300, width: 800, height: 600)
+            let moved = M.destinationFrame(window: centered, from: fsVis, to: mainVis)
+            check("relativ placering bevares (centreret → centreret)",
+                  abs(moved.midX - mainVis.midX) < 0.5 && abs(moved.midY - mainVis.midY) < 0.5 && moved.size == centered.size, "\(moved)")
+            let topLeft = CGRect(x: 1710 + 10, y: 30 + 10, width: 600, height: 400)
+            let movedTL = M.destinationFrame(window: topLeft, from: fsVis, to: mainVis)
+            check("øverst til venstre forbliver øverst til venstre og indenfor",
+                  mainVis.contains(movedTL) && movedTL.minX < 200 && movedTL.minY < 260, "\(movedTL)")
+            let huge = CGRect(x: 1710, y: 30, width: 2400, height: 1350)
+            let shrunk = M.destinationFrame(window: huge, from: fsVis, to: mainVis)
+            check("for stort vindue krympes til målets synlige område", shrunk == mainVis, "\(shrunk)")
+
             let a = DisplayAwakeAssertion()
             a.take()
             let held = a.isHeld
@@ -225,9 +247,11 @@ enum WindowSelfTest {
             let menu = builder.build()
             let titles = menu.items.map { $0.isSeparatorItem ? "—" : $0.title }
             check("fuld skærm-gruppe efter Vis sangtekst",
-                  Array(titles.drop { $0 != "Henter fra LRCLIB på nettet" }.prefix(7))
+                  Array(titles.drop { $0 != "Henter fra LRCLIB på nettet" }.prefix(8))
                   == ["Henter fra LRCLIB på nettet", "—", "Fuld skærm", "Fuld skærm-visning", "Fuld skærm-skærm",
-                      "Hold skærmen tændt", "—"], "\(titles)")
+                      "Hold skærmen tændt", "Flyt nye vinduer væk", "—"], "\(titles)")
+            check("Flyt nye vinduer væk: flueben = indstilling",
+                  menu.item(withTitle: "Flyt nye vinduer væk")?.state == (NewWindowMover.isEnabled ? .on : .off))
             check("Fuld skærm: tooltip + intet flueben", menu.item(withTitle: "Fuld skærm")?.toolTip == "Esc lukker"
                   && menu.item(withTitle: "Fuld skærm")?.state == .off)
             let vis = menu.item(withTitle: "Fuld skærm-visning")?.submenu

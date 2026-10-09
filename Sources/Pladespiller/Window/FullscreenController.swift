@@ -22,6 +22,8 @@ final class FullscreenController {
     private var screenObserver: NSObjectProtocol?
     private var terminateObserver: NSObjectProtocol?
     private let awake = DisplayAwakeAssertion()
+    /// Flytter nye vinduer væk fra fuld skærm-skærmen (kun mens den vises).
+    let windowMover = NewWindowMover()
     /// Programmet der havde fokus, før et klik på fuld skærm aktiverede os.
     private var previousApp: NSRunningApplication?
 
@@ -34,6 +36,10 @@ final class FullscreenController {
     init<Content: View>(settings: Settings, @ViewBuilder content: @escaping () -> Content) {
         self.settings = settings
         self.makeContent = { AnyView(content()) }
+        windowMover.fullscreenScreen = { [weak self] in
+            guard let self, self.window != nil else { return nil }
+            return NSScreen.screens.first { $0.stableID == self.screenID }
+        }
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -57,6 +63,15 @@ final class FullscreenController {
     }
 
     var isShowing: Bool { window != nil }
+
+    /// Menuen ▸ "Flyt nye vinduer væk".
+    var movesNewWindows: Bool {
+        get { NewWindowMover.isEnabled }
+        set {
+            NewWindowMover.isEnabled = newValue
+            if !newValue { windowMover.stop() } else if isShowing { windowMover.start(askIfNeeded: true) }
+        }
+    }
     var holdsDisplayAwake: Bool { awake.isHeld }
 
     func toggle() { isShowing ? hide() : show() }
@@ -72,6 +87,7 @@ final class FullscreenController {
         // Åbn uden at aktivere: fokus bliver hos det brugeren arbejder i på hovedskærmen.
         w.orderFrontRegardless()
         updateAssertion()
+        windowMover.start(askIfNeeded: true)
         onShowingChanged(true)
     }
 
@@ -79,6 +95,7 @@ final class FullscreenController {
         guard let w = window else { return }
         window = nil
         screenID = nil
+        windowMover.stop()
         w.cancelCursorHiding()
         NSCursor.setHiddenUntilMouseMoves(false)
         w.orderOut(nil)
