@@ -244,7 +244,8 @@ private struct ChristmasLayers: NSViewRepresentable {
 /// Sne og lyskæde som Core Animation-lag. Bruges både i widgetten, på fuld skærm og som sne på skrivebordet.
 final class ChristmasNSView: NSView {
     private let root = CALayer()
-    private let emitter = CAEmitterLayer()
+    /// Sneen: ét lag pr. fnug (falder og svajer i Core Animation). Ligger i viewets almindelige lag (y opad).
+    private let snowLayer = CALayer()
     private let wire = CAShapeLayer()
     private var bulbs: [CALayer] = []
     private var built: (CGSize, CGFloat, Bool, Bool)?
@@ -256,9 +257,9 @@ final class ChristmasNSView: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
+        layer?.addSublayer(snowLayer)
         layer?.addSublayer(root)
-        root.isGeometryFlipped = true                     // y nedad, som tegningerne
-        root.addSublayer(emitter)
+        root.isGeometryFlipped = true                     // lyskæden: y nedad, som tegningerne
         root.addSublayer(wire)
         wire.fillColor = nil
     }
@@ -273,7 +274,7 @@ final class ChristmasNSView: NSView {
         self.lights = lights
         self.running = running
         rebuildIfNeeded()
-        emitter.birthRate = running && snow ? 1 : 0
+        // (Dækkede vinduer tegnes ikke af WindowServer, så sneen koster intet, når den ikke kan ses.)
     }
 
     override func layout() {
@@ -292,34 +293,47 @@ final class ChristmasNSView: NSView {
         root.frame = bounds
 
         // Sne i tre dybder: små og langsomme langt væk, store, bløde og hurtige tæt på. Let drift og svaj.
-        emitter.frame = root.bounds
-        emitter.emitterShape = .line
-        emitter.emitterPosition = CGPoint(x: size.width / 2, y: -20 * scale)
-        emitter.emitterSize = CGSize(width: size.width * 1.3, height: 1)
-        var cells: [CAEmitterCell] = []
-        for (i, l) in ChristmasDrawing.snowLayers.enumerated() {
-            let cell = CAEmitterCell()
-            cell.contents = ChristmasDrawing.flakeImage(pixelScale: px, blur: l.blur)
-            // Fødselsrate = synlige fnug / tiden et fnug er på skærmen (så tætheden er den samme på alle størrelser).
-            let onScreen = (size.height + 40 * scale) / (l.speed * scale)
-            cell.birthRate = Float(ChristmasDrawing.visibleFlakes(l, area: size, scale: scale) / onScreen)
-            cell.lifetime = Float(onScreen * 1.5)
-            cell.velocity = l.speed * scale
-            cell.velocityRange = l.speed * scale * 0.3
-            cell.emissionLongitude = .pi / 2
-            cell.emissionRange = 0.25
-            cell.scale = l.size * scale / 16
-            cell.scaleRange = l.size * scale / 16 * 0.35
-            cell.alphaRange = 0.3
-            cell.color = NSColor(white: 1, alpha: l.alpha).cgColor
-            cell.spin = 0
-            cell.spinRange = 1.2
-            cell.xAcceleration = (i % 2 == 0 ? 2.5 : -1.5) * scale      // vinden flytter lagene lidt forskelligt
-            cell.yAcceleration = 0
-            cells.append(cell)
+        snowLayer.frame = bounds
+        snowLayer.sublayers?.forEach { $0.removeFromSuperlayer() }
+        if snow {
+            let n = ValueNoise(seed: 23)
+            var k: Int32 = 0
+            func rnd() -> CGFloat { k += 1; return CGFloat(n.hash(k, 9)) }
+            for l in ChristmasDrawing.snowLayers {
+                let image = ChristmasDrawing.flakeImage(pixelScale: px, blur: l.blur)
+                let count = Int(ChristmasDrawing.visibleFlakes(l, area: size, scale: scale).rounded())
+                for _ in 0..<count {
+                    let d = l.size * scale * (0.7 + rnd() * 0.6)
+                    let flake = CALayer()
+                    flake.bounds = CGRect(x: 0, y: 0, width: d, height: d)
+                    flake.contents = image
+                    flake.contentsScale = px
+                    flake.opacity = Float(l.alpha * (0.65 + rnd() * 0.35))
+                    let x0 = rnd() * size.width
+                    flake.position = CGPoint(x: x0, y: size.height + d)
+                    // Fald fra lige over toppen til lige under bunden (y opad), i lagets egen fart.
+                    let speed = l.speed * scale * (0.75 + rnd() * 0.5)
+                    let fall = CABasicAnimation(keyPath: "position.y")
+                    fall.fromValue = size.height + d
+                    fall.toValue = -d
+                    fall.duration = Double((size.height + 2 * d) / speed)
+                    fall.repeatCount = .infinity
+                    fall.timeOffset = Double(rnd()) * fall.duration        // fordelt over hele skærmen fra start
+                    // Svaj fra side til side (blødt, hvert fnug i sin egen takt) plus lidt vind.
+                    let amp = (3 + rnd() * 9) * scale * (l.blur > 0.5 ? 1.6 : 1)
+                    let sway = CAKeyframeAnimation(keyPath: "position.x")
+                    sway.values = [x0, x0 + amp, x0, x0 - amp, x0]
+                    sway.keyTimes = [0, 0.25, 0.5, 0.75, 1]
+                    sway.calculationMode = .cubic
+                    sway.duration = Double(3 + rnd() * 4)
+                    sway.repeatCount = .infinity
+                    sway.timeOffset = Double(rnd()) * sway.duration
+                    flake.add(fall, forKey: "fall")
+                    flake.add(sway, forKey: "sway")
+                    snowLayer.addSublayer(flake)
+                }
+            }
         }
-        emitter.emitterCells = snow ? cells : []
-        if snow { emitter.beginTime = CACurrentMediaTime() - 60 }       // det sner allerede, når den vises
 
         // Lyskæden: glaspærer med en tændt og en slukket udgave; den tændte blinker blødt ind og ud.
         bulbs.forEach { $0.removeFromSuperlayer() }
