@@ -949,6 +949,9 @@ extension SnapshotRenderer {
         if let first = items.first, let png = NSBitmapImageRep(cgImage: first.1).representation(using: .png, properties: [:]) {
             try? png.write(to: dir.appendingPathComponent("fuldskaerm-detalje-2560.png"))
         }
+        if let wood = items.last, let png = NSBitmapImageRep(cgImage: wood.1).representation(using: .png, properties: [:]) {
+            try? png.write(to: dir.appendingPathComponent("fuldskaerm-trae-2560.png"))
+        }
         TurntableImages.purgeLarge()
     }
 

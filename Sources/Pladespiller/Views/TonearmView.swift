@@ -127,18 +127,40 @@ enum ArmRenderer {
             }
         }
 
-        // Armrøret: rundt aluminium med et lyst stræk langs toppen
-        let tube = CGPath(roundedRect: CGRect(x: -h * 0.01, y: -w / 2, width: g.tubeLength + h * 0.01, height: w),
-                          cornerWidth: w / 2, cornerHeight: w / 2, transform: nil)
-        part(tube, cylinder, across: CGPoint(x: 0, y: -w / 2), CGPoint(x: 0, y: w / 2), texture: tex?.brushed, alpha: 0.6)
+        // Armrøret: S-formet, rundt aluminium. Endepunkterne er de samme som før (nålen står samme sted); røret bøjer
+        // først mod pladen og så væk, og ender i pickuphovedets vinkel.
+        let L = g.tubeLength
+        let tubeCurve = CGMutablePath()
+        tubeCurve.move(to: CGPoint(x: -h * 0.004, y: 0))
+        tubeCurve.addCurve(to: CGPoint(x: L - h * 0.012 * cos(g.headshellAngle), y: -h * 0.012 * sin(g.headshellAngle)),
+                           control1: CGPoint(x: L * 0.35, y: L * 0.13),
+                           control2: CGPoint(x: L - L * 0.30 * cos(g.headshellAngle), y: -L * 0.30 * sin(g.headshellAngle)))
+        let tubeShape = tubeCurve.copy(strokingWithWidth: w, lineCap: .round, lineJoin: .round, miterLimit: 4)
         if real {
-            ctx.move(to: CGPoint(x: h * 0.03, y: -w * 0.16)); ctx.addLine(to: CGPoint(x: g.tubeLength - h * 0.03, y: -w * 0.16))
-            ctx.setStrokeColor(Drawing.gray(1, 0.6)); ctx.setLineWidth(w * 0.16); ctx.setLineCap(.round); ctx.strokePath()
+            // rundt rør: mørk kant, lys midte og et skarpt lysstræk forskudt mod lyset (øverst til venstre)
+            ctx.addPath(tubeShape); ctx.setFillColor(aluShadow); ctx.fillPath()
+            ctx.addPath(tubeCurve); ctx.setStrokeColor(aluMid); ctx.setLineWidth(w * 0.72); ctx.setLineCap(.round); ctx.strokePath()
+            Drawing.texture(ctx, tubeShape, tex?.brushed, in: texRect, alpha: 0.45)
+            ctx.saveGState()
+            ctx.translateBy(x: -w * 0.08, y: -w * 0.14)
+            ctx.addPath(tubeCurve); ctx.setStrokeColor(aluHi); ctx.setLineWidth(w * 0.24); ctx.strokePath()
+            ctx.restoreGState()
+        } else {
+            part(tubeShape, cylinder, across: .zero, .zero)
         }
-        // Muffe mellem rør og pickuphoved
-        let collar = CGPath(roundedRect: CGRect(x: g.tubeLength - h * 0.024, y: -w * 0.92, width: h * 0.026, height: w * 1.84),
-                            cornerWidth: w * 0.35, cornerHeight: w * 0.35, transform: nil)
+
+        // Låsering (sølv) med en sort kant, hvor pickuphovedet skrues på
+        ctx.saveGState()
+        ctx.translateBy(x: L, y: 0)
+        ctx.rotate(by: g.headshellAngle)
+        let ring = CGPath(roundedRect: CGRect(x: -h * 0.03, y: -w * 1.05, width: h * 0.022, height: w * 2.1),
+                          cornerWidth: w * 0.4, cornerHeight: w * 0.4, transform: nil)
+        part(ring, Drawing.gradient([(0, aluLow), (0.35, aluHi), (1, aluShadow)]), across: CGPoint(x: 0, y: -w), CGPoint(x: 0, y: w),
+             texture: tex?.lathe, alpha: 0.4)
+        let collar = CGPath(roundedRect: CGRect(x: -h * 0.009, y: -w * 0.85, width: h * 0.01, height: w * 1.7),
+                            cornerWidth: w * 0.3, cornerHeight: w * 0.3, transform: nil)
         solid(collar, bearingBlack, texture: tex?.grain, alpha: 0.35)
+        ctx.restoreGState()
 
         // Pickuphoved (vinklet), fingerløft, pickup med skruer, nålebøjlen stikker lige frem
         ctx.saveGState()
@@ -150,7 +172,7 @@ enum ArmRenderer {
         lift.addQuadCurve(to: CGPoint(x: hl * 0.8, y: -hw * 1.32), control: CGPoint(x: hl * 0.56, y: -hw * 1.15))
         ctx.addPath(lift)
         ctx.setStrokeColor(sil ? black : flat?.edge ?? aluMid)
-        ctx.setLineWidth(max(0.9, h * 0.0075)); ctx.setLineCap(.round); ctx.strokePath()
+        ctx.setLineWidth(max(0.9, h * 0.008)); ctx.setLineCap(.round); ctx.strokePath()
         let plate = CGMutablePath()
         plate.move(to: CGPoint(x: -h * 0.004, y: -w * 0.85))
         plate.addLine(to: CGPoint(x: hl * 0.28, y: -hw / 2))
@@ -159,13 +181,16 @@ enum ArmRenderer {
         plate.addLine(to: CGPoint(x: hl * 0.28, y: hw / 2))
         plate.addLine(to: CGPoint(x: -h * 0.004, y: w * 0.85))
         plate.closeSubpath()
-        part(plate, Drawing.gradient([(0, aluMid), (0.4, aluHi), (1, aluLow)]), across: CGPoint(x: 0, y: -hw / 2), CGPoint(x: 0, y: hw / 2),
-             texture: tex?.brushed, alpha: 0.5)
+        // sort pickuphoved (som på en DJ-pladespiller)
+        part(plate, Drawing.gradient([(0, bearingRing), (0.35, Drawing.color(0.20, 0.205, 0.22)), (1, bearingBlack)]),
+             across: CGPoint(x: 0, y: -hw / 2), CGPoint(x: 0, y: hw / 2), texture: tex?.grain, alpha: 0.35)
         if real {
-            ctx.addPath(plate); ctx.setStrokeColor(Drawing.gray(0, 0.3)); ctx.setLineWidth(0.45); ctx.strokePath()
+            ctx.addPath(plate); ctx.setStrokeColor(Drawing.gray(1, 0.18)); ctx.setLineWidth(0.45); ctx.strokePath()
             let cart = CGRect(x: hl * 0.40, y: -hw * 0.34, width: hl * 0.56, height: hw * 0.68)
-            solid(CGPath(roundedRect: cart, cornerWidth: hw * 0.08, cornerHeight: hw * 0.08, transform: nil), cartridgeBody,
+            solid(CGPath(roundedRect: cart, cornerWidth: hw * 0.08, cornerHeight: hw * 0.08, transform: nil), Drawing.color(0.16, 0.165, 0.18),
                   texture: tex?.grain, alpha: 0.35)
+            ctx.addPath(CGPath(roundedRect: cart, cornerWidth: hw * 0.08, cornerHeight: hw * 0.08, transform: nil))
+            ctx.setStrokeColor(Drawing.gray(0, 0.6)); ctx.setLineWidth(0.5); ctx.strokePath()
             ctx.addPath(CGPath(roundedRect: CGRect(x: cart.minX, y: cart.minY, width: cart.width, height: cart.height * 0.28),
                                cornerWidth: hw * 0.08, cornerHeight: hw * 0.08, transform: nil))
             ctx.setFillColor(Drawing.gray(1, 0.08)); ctx.fillPath()
@@ -191,8 +216,9 @@ enum ArmRenderer {
                           cornerWidth: b * 0.2, cornerHeight: b * 0.2, transform: nil)
         part(yoke, cylinder, across: CGPoint(x: -b * 0.42, y: 0), CGPoint(x: b * 0.42, y: 0), texture: tex?.brushed, alpha: 0.5)
         let housing = Drawing.circle(.zero, b)
-        part(housing, Drawing.gradient([(0, bearingRing), (1, bearingBlack)]), across: CGPoint(x: -b * 0.6, y: -b * 0.7), CGPoint(x: b * 0.5, y: b * 0.6),
-             texture: tex?.grain, alpha: 0.35)
+        // lejehuset i sølv (som på en DJ-pladespiller), mørkere end hætten
+        part(housing, Drawing.gradient([(0, aluMid), (0.5, aluLow), (1, aluShadow)]), across: CGPoint(x: -b * 0.6, y: -b * 0.7), CGPoint(x: b * 0.5, y: b * 0.6),
+             texture: tex?.lathe, alpha: 0.35)
         let cap = Drawing.circle(.zero, b * 0.55)
         if real {
             Drawing.fill(ctx, cap, Drawing.gradient([(0, aluHi), (0.7, aluMid), (1, aluLow)]),

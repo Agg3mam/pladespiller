@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreImage
 import Foundation
 import ImageIO
 
@@ -6,12 +7,12 @@ import ImageIO
 ///
 /// Opslag: 1) `Bundle.main` → `Contents/Resources/Textures/` i den færdige app, 2) `$PLADESPILLER_RESOURCES/Textures/`,
 /// 3) `./Resources/Textures/` (så `--render-snapshots` virker fra en worktree). Ingen fil → det tegnede træ (`WoodVeneer`).
-/// Originalen læses aldrig ind i fuld størrelse: ImageIO laver et thumbnail på højst 1024 px, som caches.
+/// ImageIO afkoder fotoet i fuld størrelse (højst 2048 px), så fuld skærm ikke skal forstørre et lille udsnit.
 enum WoodTexture {
     /// Foretrukne filnavne (uden filtype) – det første der findes bruges; ellers første billede i mappen.
     nonisolated static let preferredNames = ["dark_wood", "walnut", "valnoed", "wood", "trae"]
     nonisolated static let extensions = ["jpg", "jpeg", "png", "heic", "tif", "tiff", "webp"]
-    nonisolated static let maxPixelSize = 1400
+    nonisolated static let maxPixelSize = 2048
 
     enum State { case notLoaded, loading, ready(CGImage), missing }
     private(set) static var state: State = .notLoaded
@@ -135,18 +136,46 @@ enum WoodTexture {
     static let cropUnit = CGRect(x: 0.10, y: 0.14, width: 0.74, height: 0.74)
 
     /// Fotoet beskåret (aspect fill inden for udsnittet) og skaleret til kroppens størrelse. Kaldes kun via billedcachen.
+    ///
+    /// Store flader (fuld skærm): udsnittet gøres større – op til hele fotoet – så det forstørres mindst muligt.
+    /// Den forstørrelse der er tilbage laves med Lanczos og en let skarphed, og der lægges fine årer ovenpå
+    /// i skærmens egen opløsning, så træet står skarpt tæt på.
     static func fitted(size: CGSize, scale: CGFloat) -> CGImage? {
         guard let src = image else { return nil }
         let iw = CGFloat(src.width), ih = CGFloat(src.height)
-        var crop = CGRect(x: cropUnit.minX * iw, y: cropUnit.minY * ih, width: cropUnit.width * iw, height: cropUnit.height * ih)
-        // samme forhold som kroppen, skåret fra udsnittets øverste venstre del
         let aspect = size.width / size.height
+        let targetW = size.width * scale
+        // Hvor stor en del af fotoet: mindst det faste udsnit, mere hvis fladen er bredere end udsnittet i pixels.
+        let fraction = min(1, max(cropUnit.width, targetW / iw, targetW / aspect / ih))
+        let originX = min(cropUnit.minX, 1 - fraction), originY = min(cropUnit.minY, 1 - fraction)
+        var crop = CGRect(x: originX * iw, y: originY * ih, width: fraction * iw, height: fraction * ih)
+        // samme forhold som kroppen, skåret fra udsnittets øverste venstre del
         if crop.width / crop.height > aspect { crop.size.width = crop.height * aspect }
         else { crop.size.height = crop.width / aspect }
-        guard let piece = src.cropping(to: crop.integral) else { return nil }
+        guard var piece = src.cropping(to: crop.integral) else { return nil }
+        let upscale = targetW / CGFloat(piece.width)
+        if upscale > 1.05, let sharp = lanczos(piece, scale: upscale) { piece = sharp }
+        let detail = upscale > 1.05
+            ? Drawing.noise(size: size, scale: scale, fx: 0.006, fy: 0.55, seed: 33, contrast: 1.6) : nil
         return Drawing.image(size: size, scale: scale) { ctx in
-            PlinthRenderer.drawUpright(ctx, piece, in: CGRect(origin: .zero, size: size))
+            let rect = CGRect(origin: .zero, size: size)
+            PlinthRenderer.drawUpright(ctx, piece, in: rect)
+            // fine årer (vandrette striber) i fuld opløsning
+            Drawing.texture(ctx, CGPath(rect: rect, transform: nil), detail, in: rect, alpha: 0.22)
         }
+    }
+
+    /// Skarp forstørrelse (Lanczos) med en let skarphed på lysstyrken.
+    static func lanczos(_ img: CGImage, scale: CGFloat) -> CGImage? {
+        let ci = CIImage(cgImage: img)
+        guard let f = CIFilter(name: "CILanczosScaleTransform") else { return nil }
+        f.setValue(ci, forKey: kCIInputImageKey)
+        f.setValue(scale, forKey: kCIInputScaleKey)
+        f.setValue(1.0, forKey: kCIInputAspectRatioKey)
+        guard var out = f.outputImage else { return nil }
+        out = out.applyingFilter("CISharpenLuminance", parameters: [kCIInputSharpnessKey: 0.5, kCIInputRadiusKey: 1.5])
+        let extent = CGRect(x: 0, y: 0, width: (CGFloat(img.width) * scale).rounded(.down), height: (CGFloat(img.height) * scale).rounded(.down))
+        return CIContext(options: [.workingColorSpace: Drawing.colorSpace]).createCGImage(out.cropped(to: extent), from: extent)
     }
 }
 
