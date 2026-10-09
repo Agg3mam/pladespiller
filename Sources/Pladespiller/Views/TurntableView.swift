@@ -235,7 +235,8 @@ final class TurntableNSView: NSView {
     }
 
     private func rebuild() {
-        guard let geometry, let style else { return }
+        // Intet at tegne før visningen har en størrelse (fx det første øjeblik på fuld skærm).
+        guard let geometry, let style, geometry.h >= 1, geometry.size.width >= 1, geometry.size.height >= 1 else { return }
         turntable.configure(geometry, style: style, scale: scale)
         resync()
     }

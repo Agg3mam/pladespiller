@@ -261,6 +261,8 @@ enum PlinthRenderer {
     // MARK: Materialer (pixel for pixel, én gang pr. størrelse)
 
     static func materialTexture(_ m: PlinthMaterial, size: CGSize, h: CGFloat, scale: CGFloat) -> CGImage? {
+        // Fuld skærm er et øjeblik 0 × 0, før vinduet har fået sin størrelse: intet at tegne (og 148/h ville være uendelig).
+        guard h >= 1, size.width >= 1, size.height >= 1 else { return nil }
         let k = Float(148 / h)   // tekstur i samme tæthed som på lille størrelse
         switch m {
         case .wood(let species):

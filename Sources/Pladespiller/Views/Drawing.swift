@@ -207,6 +207,7 @@ struct ValueNoise {
     }
 
     @inline(__always) func value(_ x: Float, _ y: Float) -> Float {
+        guard x.isFinite, y.isFinite else { return 0.5 }      // aldrig et nedbrud på uendelig/NaN
         let xf0 = x.rounded(.down), yf0 = y.rounded(.down)
         let xi = Int32(truncatingIfNeeded: Int(xf0)), yi = Int32(truncatingIfNeeded: Int(yf0))
         let fx = x - xf0, fy = y - yf0
