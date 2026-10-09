@@ -150,7 +150,7 @@ final class WidgetHostingView<Content: View>: NSHostingView<Content> {
 /// skærmskift og størrelsesskift. Ingen timere: alt sker på hændelser.
 final class WidgetPanelController {
     /// Sættes af App.swift; menuen ▸ "Fuld skærm" bruger den.
-    var fullscreen: FullscreenController?
+    var fullscreen: FullscreenController? { didSet { menu.fullscreen = fullscreen } }
     private let settings: Settings
     private let style = WidgetStyle()
     private let panel: WidgetPanel

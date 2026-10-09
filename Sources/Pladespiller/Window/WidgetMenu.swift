@@ -5,6 +5,12 @@ import ServiceManagement
 /// er aktuelle. Al tekst på dansk.
 final class WidgetMenu {
     private let settings: Settings
+    /// Fuld skærm (sættes af `WidgetPanelController`). Nil → punkterne vises ikke.
+    var fullscreen: FullscreenController?
+    /// Tilsluttede skærme (id, navn); kan erstattes i selvtesten.
+    var screens: () -> [(id: String, name: String)] = {
+        NSScreen.screens.map { ($0.stableID, $0.localizedName) }
+    }
     /// Menupunkternes `target` er svage referencer – handlingerne holdes her under visningen.
     private var actions: [MenuAction] = []
 
@@ -62,6 +68,11 @@ final class WidgetMenu {
         menu.addItem(note("Henter fra LRCLIB på nettet"))
         menu.addItem(.separator())
 
+        if let fullscreen {
+            addFullscreenItems(to: menu, fullscreen)
+            menu.addItem(.separator())
+        }
+
         menu.addItem(item("Lås placering", checked: settings.positionLocked) { [settings] in
             settings.positionLocked.toggle()
         })
@@ -75,6 +86,43 @@ final class WidgetMenu {
             DispatchQueue.main.async { MainActor.assumeIsolated { RemoveWidget.confirmAndRemove() } }
         })
         return menu
+    }
+
+    /// Fuld skærm, Fuld skærm-visning ▸, Fuld skærm-skærm ▸ (kun ved flere skærme), Hold skærmen tændt.
+    private func addFullscreenItems(to menu: NSMenu, _ fullscreen: FullscreenController) {
+        let toggle = item("Fuld skærm", checked: fullscreen.isShowing) { [weak fullscreen] in
+            // Efter menuens sporingsløkke.
+            DispatchQueue.main.async { MainActor.assumeIsolated { fullscreen?.toggle() } }
+        }
+        toggle.toolTip = "Esc lukker"
+        menu.addItem(toggle)
+
+        let layout = NSMenu()
+        for l in FullscreenLayout.allCases {
+            layout.addItem(item(l.title, checked: settings.fullscreenLayout == l) { [settings] in
+                settings.fullscreenLayout = l
+            })
+        }
+        menu.addItem(submenu("Fuld skærm-visning", layout))
+
+        let list = screens()
+        if list.count > 1 {
+            let sm = NSMenu()
+            sm.addItem(item("Automatisk", checked: settings.fullscreenScreenID == nil) { [settings] in
+                settings.fullscreenScreenID = nil
+            })
+            sm.addItem(.separator())
+            for s in list {
+                sm.addItem(item(s.name, checked: settings.fullscreenScreenID == s.id) { [settings] in
+                    settings.fullscreenScreenID = s.id
+                })
+            }
+            menu.addItem(submenu("Fuld skærm-skærm", sm))
+        }
+
+        menu.addItem(item("Hold skærmen tændt", checked: settings.keepDisplayAwake) { [settings] in
+            settings.keepDisplayAwake.toggle()
+        })
     }
 
     /// Farve ▸ til temaet Flad. Altid aktiv: vælger man en farve, skifter temaet til Flad, så valget

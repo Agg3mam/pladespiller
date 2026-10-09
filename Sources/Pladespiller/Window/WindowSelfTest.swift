@@ -181,6 +181,67 @@ enum WindowSelfTest {
             UserDefaults.standard.removePersistentDomain(forName: "pladespiller.selftest.menu")
         }
 
+        // 11. Fuld skærm.
+        do {
+            typealias F = FullscreenController
+            check("skærm: valgt og tilsluttet", F.chooseScreen(screenIDs: ["A", "B", "C"], preferredID: "C", widgetScreenID: nil) == "C")
+            check("skærm: valgt men væk → automatisk", F.chooseScreen(screenIDs: ["A", "B"], preferredID: "X", widgetScreenID: nil) == "B")
+            check("skærm: ikke hovedskærmen", F.chooseScreen(screenIDs: ["A", "B"], preferredID: nil, widgetScreenID: "A") == "B")
+            check("skærm: helst ikke widgettens", F.chooseScreen(screenIDs: ["A", "B", "C"], preferredID: nil, widgetScreenID: "B") == "C")
+            check("skærm: kun ekstra med widget → den alligevel", F.chooseScreen(screenIDs: ["A", "B"], preferredID: nil, widgetScreenID: "B") == "B")
+            check("skærm: kun én", F.chooseScreen(screenIDs: ["A"], preferredID: nil, widgetScreenID: "A") == "A")
+            check("skærm: ingen", F.chooseScreen(screenIDs: [], preferredID: nil, widgetScreenID: nil) == nil)
+            check("tændt: kun når vist + spiller + slået til",
+                  F.shouldHoldDisplayAwake(keepAwake: true, showing: true, playing: true)
+                  && !F.shouldHoldDisplayAwake(keepAwake: true, showing: true, playing: false)
+                  && !F.shouldHoldDisplayAwake(keepAwake: false, showing: true, playing: true)
+                  && !F.shouldHoldDisplayAwake(keepAwake: true, showing: false, playing: true))
+
+            let a = DisplayAwakeAssertion()
+            a.take()
+            let held = a.isHeld
+            a.take()   // idempotent
+            a.release()
+            check("IOPM-assertion tages og slippes", held && !a.isHeld)
+
+            let defaults = UserDefaults(suiteName: "pladespiller.selftest.fs") ?? .standard
+            let settings = Settings(defaults: defaults)
+            settings.fullscreenScreenID = nil
+            settings.fullscreenLayout = .lyrics
+            settings.keepDisplayAwake = true
+            let fs = FullscreenController(settings: settings) { Color.black }
+            fs.isPlaying = true
+            check("ingen assertion når fuld skærm ikke vises", !fs.holdsDisplayAwake)
+            let builder = WidgetMenu(settings: settings)
+            builder.fullscreen = fs
+            builder.screens = { [("A", "Indbygget skærm"), ("B", "LG UltraFine")] }
+            let menu = builder.build()
+            let titles = menu.items.map { $0.isSeparatorItem ? "—" : $0.title }
+            check("fuld skærm-gruppe efter Vis sangtekst",
+                  Array(titles.drop { $0 != "Henter fra LRCLIB på nettet" }.prefix(7))
+                  == ["Henter fra LRCLIB på nettet", "—", "Fuld skærm", "Fuld skærm-visning", "Fuld skærm-skærm",
+                      "Hold skærmen tændt", "—"], "\(titles)")
+            check("Fuld skærm: tooltip + intet flueben", menu.item(withTitle: "Fuld skærm")?.toolTip == "Esc lukker"
+                  && menu.item(withTitle: "Fuld skærm")?.state == .off)
+            let vis = menu.item(withTitle: "Fuld skærm-visning")?.submenu
+            check("Fuld skærm-visning", vis?.items.map(\.title) == ["Med sangtekst", "Kun pladespiller"]
+                  && vis?.item(withTitle: "Med sangtekst")?.state == .on)
+            let sk = menu.item(withTitle: "Fuld skærm-skærm")?.submenu
+            check("Fuld skærm-skærm", sk?.items.map { $0.isSeparatorItem ? "—" : $0.title }
+                  == ["Automatisk", "—", "Indbygget skærm", "LG UltraFine"] && sk?.item(withTitle: "Automatisk")?.state == .on)
+            func fire(_ i: NSMenuItem?) { if let i, let a = i.action { _ = (i.target as? NSObject)?.perform(a, with: i) } }
+            fire(vis?.item(withTitle: "Kun pladespiller"))
+            fire(sk?.item(withTitle: "LG UltraFine"))
+            fire(menu.item(withTitle: "Hold skærmen tændt"))
+            check("fuld skærm-handlinger sætter indstillinger",
+                  settings.fullscreenLayout == .turntable && settings.fullscreenScreenID == "B" && !settings.keepDisplayAwake)
+            builder.screens = { [("A", "Indbygget skærm")] }
+            check("Fuld skærm-skærm skjult ved én skærm", builder.build().item(withTitle: "Fuld skærm-skærm") == nil)
+            withExtendedLifetime(builder) {}
+            withExtendedLifetime(fs) {}
+            UserDefaults.standard.removePersistentDomain(forName: "pladespiller.selftest.fs")
+        }
+
         let live = WidgetStyle()
         print("     system: AppleIconAppearanceTheme=\(live.iconTheme ?? "–") widgetAppearance=\(live.widgetAppearance.map(String.init) ?? "–") → \(live.material), \(String(describing: live.forcedScheme))")
         print("     Apple-widgets nu:", AppleWidgetWindows.frames())
