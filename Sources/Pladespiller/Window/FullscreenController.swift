@@ -5,15 +5,15 @@ import SwiftUI
 
 /// Fuld skærm på en (helst ekstra) skærm som "nu spiller"-display. Ejes af Vindue-agenten.
 ///
-/// **Valg: et kantløst vindue på et niveau over menulinjen og Dock** (`statusBar + 1`), der dækker
-/// hele `screen.frame`, med `.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle`.
-/// Ikke `toggleFullScreen` i eget Space, fordi:
-/// - med "Skærme har separate Spaces" slået fra gør et fuld skærm-Space alle skærme sorte;
-/// - et eget Space kan flyttes/skiftes af Mission Control, swipes og Cmd+Tab, og animationen
-///   aktiverer appen (stjæler fokus fra hovedskærmen);
-/// - en baggrundsapp (LSUIElement) uden key-vindue kan ikke pålideligt gå i fuld skærm.
-/// Vinduet ligger kun på den valgte skærm, så hovedskærmen påvirkes ikke. Menuer og
-/// systembeskeder (højere niveauer) kommer stadig over.
+/// **Valg: en levende baggrund på skrivebordsniveau** (`desktopIconWindow + 1` = -2147483602), der
+/// dækker hele `screen.frame`, med `.canJoinAllSpaces, .stationary, .ignoresCycle`.
+/// - Alle almindelige vinduer (nye og flyttede), Dock og menulinjen ligger foran (brugerens ønske:
+///   "nye apps må ikke åbne bagved").
+/// - Over skrivebordsikoner (-2147483603) og baggrundsbillede; under vores egen widget og Apples
+///   widgets (-2147483601), så de ikke forsvinder.
+/// - Står stille ved Space-skift og i Mission Control som skrivebordet (`.stationary`).
+/// Ikke `toggleFullScreen` i eget Space: med "Skærme har separate Spaces" slået fra gør det alle
+/// skærme sorte, Spaces kan flyttes af swipes/Mission Control, og overgangen stjæler fokus.
 final class FullscreenController {
     private let settings: Settings
     private let makeContent: () -> AnyView
@@ -148,7 +148,9 @@ final class FullscreenController {
             if front != NSRunningApplication.current { previousApp = front }
             NSApp.activate()
         }
-        window?.makeKeyAndOrderFront(nil)
+        // Kun key – ikke orderFront: vinduet må ikke komme foran brugerens vinduer. (På skrivebords-
+        // niveau kan det heller ikke, men vi rører ikke rækkefølgen.)
+        window?.makeKey()
     }
 
     // MARK: Hold skærmen tændt
@@ -195,13 +197,18 @@ final class FullscreenWindow: NSPanel {
     var onClick: () -> Void = {}
     private var hideCursorWork: DispatchWorkItem?
     static let cursorIdle: TimeInterval = 3
+    /// Lige under widgetniveauet (Apples og vores widgets: desktopIconWindow + 2).
+    static var windowLevel: NSWindow.Level {
+        NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
+    }
+    static let behavior: NSWindow.CollectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
 
     init(screen: NSScreen) {
         super.init(contentRect: screen.frame, styleMask: [.borderless, .nonactivatingPanel],
                    backing: .buffered, defer: false)
         setFrame(screen.frame, display: false)
-        level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
-        collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+        level = Self.windowLevel
+        collectionBehavior = Self.behavior
         isOpaque = true
         backgroundColor = .black            // indtil indholdet tegner
         hasShadow = false
@@ -235,13 +242,20 @@ final class FullscreenWindow: NSPanel {
 
     override func cancelOperation(_ sender: Any?) { onEscape() }
 
-    /// Skjul cursoren efter 3 s uden bevægelse – kun hvis den står over dette vindue.
+    /// Er det øverste vindue under musen vores (ikke et vindue, Dock eller widget foran)?
+    var isTopmostUnderMouse: Bool {
+        let p = NSEvent.mouseLocation
+        return frame.contains(p) && NSWindow.windowNumber(at: p, belowWindowWithWindowNumber: 0) == windowNumber
+    }
+
+    /// Skjul cursoren efter 3 s uden bevægelse – kun hvis den står direkte over dette vindue.
     /// Engangsforsinkelse der kun startes af musebevægelse (ingen løbende timer).
     func scheduleCursorHiding() {
         hideCursorWork?.cancel()
+        guard isTopmostUnderMouse else { hideCursorWork = nil; return }
         let work = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated {
-                guard let self, self.isVisible, self.frame.contains(NSEvent.mouseLocation) else { return }
+                guard let self, self.isVisible, self.isTopmostUnderMouse else { return }
                 NSCursor.setHiddenUntilMouseMoves(true)
             }
         }

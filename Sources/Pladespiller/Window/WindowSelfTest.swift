@@ -197,6 +197,13 @@ enum WindowSelfTest {
                   && !F.shouldHoldDisplayAwake(keepAwake: false, showing: true, playing: true)
                   && !F.shouldHoldDisplayAwake(keepAwake: true, showing: false, playing: true))
 
+            check("fuld skærm-niveau = desktopIconWindow + 1 (-2147483602), under widgets",
+                  FullscreenWindow.windowLevel.rawValue == -2147483602
+                  && FullscreenWindow.windowLevel.rawValue < WidgetMetrics.windowLevel.rawValue
+                  && FullscreenWindow.windowLevel.rawValue > Int(CGWindowLevelForKey(.desktopIconWindow))
+                  && FullscreenWindow.windowLevel.rawValue < NSWindow.Level.normal.rawValue)
+            check("fuld skærm-collectionBehavior", FullscreenWindow.behavior == [.canJoinAllSpaces, .stationary, .ignoresCycle])
+
             let a = DisplayAwakeAssertion()
             a.take()
             let held = a.isHeld
