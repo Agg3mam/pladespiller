@@ -20,6 +20,8 @@ struct TurntableStyle: Hashable {
     var plinth: PlinthMaterial
     /// Basisplade under armen og knapper: lys eller mørk metal.
     var darkHardware: Bool
+    /// Flad: armen (og dens bundplade og støtte) er sort i stedet for hvid, fordi macOS står i mørk tilstand.
+    var flatArmDark = false
 
     /// Træsort for tema Træ. Kan ændres når brugeren har valgt (valnød eller lys eg).
     static var woodSpecies: WoodSpecies = .walnut
@@ -31,10 +33,11 @@ struct TurntableStyle: Hashable {
     }
 
     static func make(theme: TurntableTheme, artwork: NSImage?, flatColor: FlatColor = .auto,
-                     customHex: String = "F2B705") -> TurntableStyle {
+                     customHex: String = "F2B705", flatArmDark: Bool? = nil) -> TurntableStyle {
         switch theme {
         case .flat:
-            TurntableStyle(plinth: flatMaterial(flatColor, customHex: customHex, artwork: artwork), darkHardware: false)
+            TurntableStyle(plinth: flatMaterial(flatColor, customHex: customHex, artwork: artwork), darkHardware: false,
+                           flatArmDark: flatArmDark ?? SystemAppearance.shared.isDark)
         case .wood: TurntableStyle(plinth: .wood(woodSpecies), darkHardware: false)
         case .aluminium: TurntableStyle(plinth: .aluminium, darkHardware: true)
         case .black: TurntableStyle(plinth: .black, darkHardware: false)
@@ -166,19 +169,29 @@ enum PlinthRenderer {
                          Drawing.gradient([(0, Drawing.gray(1, 0.05)), (0.55, Drawing.gray(1, 0)), (1, Drawing.gray(0, 0.05))]),
                          from: CGPoint(x: rect.midX, y: rect.minY), to: CGPoint(x: rect.midX, y: rect.maxY))
 
-            // Fordybning bag armens leje: en anelse mørkere skive med blød indre skygge foroven og lys kant forneden.
-            let c = g.pivot, r = g.flatRecessRadius
-            ctx.addPath(Drawing.circle(c, r)); ctx.setFillColor(col(p.recess)); ctx.fillPath()
-            ctx.saveGState()
-            ctx.addPath(Drawing.circle(c, r)); ctx.clip()
-            Drawing.fill(ctx, Drawing.circle(c, r),
-                         Drawing.gradient([(0, Drawing.gray(0, 0.07)), (0.35, Drawing.gray(0, 0)), (1, Drawing.gray(1, 0.05))]),
-                         from: CGPoint(x: c.x, y: c.y - r), to: CGPoint(x: c.x, y: c.y + r))
             ctx.restoreGState()
-            ctx.addPath(Drawing.circle(c, r - 0.4)); ctx.setStrokeColor(col(p.body * 0.86, 0.35)); ctx.setLineWidth(0.8); ctx.strokePath()
-
-            ctx.restoreGState()
+            flatArmBase(ctx, g, dark: style.flatArmDark, scale: scale)
         }
+    }
+
+    /// Flad: rund bundplade under lejet (med en lille antiskating-knap) og armstøtten, i armens flade farve med tynd kant.
+    static func flatArmBase(_ ctx: CGContext, _ g: TurntableGeometry, dark: Bool, scale: CGFloat) {
+        let h = g.h, colors = ArmRenderer.flatColors(dark: dark)
+        func part(_ c: CGPoint, _ r: CGFloat, shadow: Bool) {
+            if shadow {
+                ctx.saveGState()
+                ctx.setShadow(offset: CGSize(width: h * 0.004 * scale, height: -h * 0.008 * scale), blur: h * 0.018 * scale,
+                              color: Drawing.gray(0, 0.22))
+                ctx.addPath(Drawing.circle(c, r)); ctx.setFillColor(colors.fill); ctx.fillPath()
+                ctx.restoreGState()
+            }
+            ctx.addPath(Drawing.circle(c, r)); ctx.setFillColor(colors.fill); ctx.fillPath()
+            ctx.addPath(Drawing.circle(c, r - 0.3)); ctx.setStrokeColor(colors.edge); ctx.setLineWidth(max(0.5, h * 0.0018)); ctx.strokePath()
+        }
+        let p = g.pivot, br = g.basePlateRadius
+        part(p, br, shadow: true)
+        part(CGPoint(x: p.x + br * 0.7 * cos(-0.75), y: p.y + br * 0.7 * sin(-0.75)), h * 0.013, shadow: false)
+        part(g.world(CGPoint(x: g.armRestLocalX, y: 0), armAngle: g.restAngle), h * 0.018, shadow: true)
     }
 
     /// CGImage tegnet i en y-nedad-kontekst skal vendes for at stå rigtigt.
@@ -307,6 +320,20 @@ enum PlinthRenderer {
             ? Drawing.gradient([(0, Drawing.gray(0.30)), (1, Drawing.gray(0.12))])
             : Drawing.gradient([(0, Drawing.gray(0.90)), (0.5, Drawing.gray(0.70)), (1, Drawing.gray(0.50))])
         Drawing.fill(ctx, Drawing.circle(p, br), plate, from: CGPoint(x: p.x - br, y: p.y - br), to: CGPoint(x: p.x + br, y: p.y + br))
+        // drejet aluminium: tætte, svage ringe og to modsatte lysvinger på tværs af dem (lyset øverst til venstre)
+        ctx.saveGState()
+        ctx.addPath(Drawing.circle(p, br)); ctx.clip()
+        var ringR = br * 0.1
+        while ringR < br { ctx.addPath(Drawing.circle(p, ringR)); ringR += max(0.6, h * 0.0024) }
+        ctx.setStrokeColor(Drawing.gray(style.darkHardware ? 1 : 0, 0.07)); ctx.setLineWidth(max(0.25, h * 0.0008)); ctx.strokePath()
+        for a in [-2.2, -2.2 + CGFloat.pi] {
+            let wedge = CGMutablePath()
+            wedge.move(to: p)
+            wedge.addArc(center: p, radius: br, startAngle: a - 0.22, endAngle: a + 0.22, clockwise: false)
+            wedge.closeSubpath()
+            ctx.addPath(wedge); ctx.setFillColor(Drawing.gray(1, style.darkHardware ? 0.10 : 0.22)); ctx.fillPath()
+        }
+        ctx.restoreGState()
         ctx.addPath(Drawing.circle(p, br * 0.78))
         ctx.setStrokeColor(Drawing.gray(style.darkHardware ? 0.0 : 0.35, 0.5)); ctx.setLineWidth(max(0.5, h * 0.003)); ctx.strokePath()
         ctx.addPath(Drawing.circle(p, br - 0.4))
@@ -499,9 +526,29 @@ struct FlatPalette: Hashable {
         }
         return NSColor(white: 1, alpha: 0.95)
     }
+    /// Kunstner/sangtekst: samme farve som titlen, men svagere – med den laveste dækning (fra 60 %), der stadig giver
+    /// mindst 4,5:1 mod kroppen, så teksten altid kan læses.
     var secondaryColor: NSColor {
-        if luminance > 0.78 { return NSColor(white: 0, alpha: 0.38) }
-        return NSColor(white: 1, alpha: isLight ? 0.38 : 0.5)
+        let ink: SIMD3<Float> = isLight ? body * 0.16 : SIMD3(1, 1, 1)
+        let alpha = Self.readableAlpha(ink: ink, on: body)
+        return NSColor(srgbRed: CGFloat(ink.x), green: CGFloat(ink.y), blue: CGFloat(ink.z), alpha: CGFloat(alpha))
+    }
+
+    /// WCAG-kontrast (relativ luminans i lineært lys).
+    static func contrast(_ a: SIMD3<Float>, _ b: SIMD3<Float>) -> Float {
+        func lin(_ c: Float) -> Float { c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4) }
+        func lum(_ c: SIMD3<Float>) -> Float { 0.2126 * lin(c.x) + 0.7152 * lin(c.y) + 0.0722 * lin(c.z) }
+        let la = lum(a), lb = lum(b)
+        return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+    }
+
+    static func readableAlpha(ink: SIMD3<Float>, on body: SIMD3<Float>, minimum: Float = 4.5) -> Float {
+        var a: Float = 0.6
+        while a < 1 {
+            if contrast(ink * a + body * (1 - a), body) >= minimum { return a }
+            a += 0.02
+        }
+        return 1
     }
 
     static func parseHex(_ hex: String) -> SIMD3<Float>? {

@@ -18,6 +18,8 @@ final class FullscreenController {
     private let settings: Settings
     private let makeContent: () -> AnyView
     private var window: FullscreenWindow?
+    /// Smalt dække over menulinjen på fuld skærm-skærmen (brugerens ønske: menulinjen skal ikke kunne ses).
+    private var cover: MenuBarCover?
     private var screenID: String?
     private var screenObserver: NSObjectProtocol?
     private var terminateObserver: NSObjectProtocol?
@@ -86,6 +88,7 @@ final class FullscreenController {
         screenID = screen.stableID
         // Åbn uden at aktivere: fokus bliver hos det brugeren arbejder i på hovedskærmen.
         w.orderFrontRegardless()
+        updateCover(screen)
         updateAssertion()
         windowMover.start(askIfNeeded: true)
         onShowingChanged(true)
@@ -96,6 +99,9 @@ final class FullscreenController {
         window = nil
         screenID = nil
         windowMover.stop()
+        cover?.orderOut(nil)
+        cover?.close()
+        cover = nil
         w.cancelCursorHiding()
         NSCursor.setHiddenUntilMouseMoves(false)
         w.orderOut(nil)
@@ -133,6 +139,22 @@ final class FullscreenController {
             return
         }
         if w.frame != screen.frame { w.setFrame(screen.frame, display: true) }   // ny opløsning
+        updateCover(screen)
+    }
+
+    /// Læg dækket præcis over menulinjen på skærmen (højden = forskellen mellem skærmen og dens synlige del foroven).
+    /// Har skærmen ingen menulinje (fx "Skærme har separate Spaces" slået fra), fjernes dækket.
+    private func updateCover(_ screen: NSScreen) {
+        let barHeight = screen.frame.maxY - screen.visibleFrame.maxY
+        guard barHeight > 0 else {
+            cover?.orderOut(nil); cover?.close(); cover = nil
+            return
+        }
+        let c = cover ?? MenuBarCover(content: AnyView(makeContent().environment(\.fullscreenCoverStrip, true)))
+        c.place(on: screen, height: barHeight)
+        c.onEscape = { [weak self] in self?.hide() }
+        c.orderFrontRegardless()
+        cover = c
     }
 
     private func observeSettings() {
@@ -153,6 +175,7 @@ final class FullscreenController {
         if let w = window, let screen = targetScreen(), screen.stableID != screenID {
             screenID = screen.stableID
             w.setFrame(screen.frame, display: true)
+            updateCover(screen)
         }
     }
 
@@ -283,6 +306,45 @@ final class FullscreenWindow: NSPanel {
     func cancelCursorHiding() {
         hideCursorWork?.cancel()
         hideCursorWork = nil
+    }
+}
+
+/// Dækket over menulinjen: et smalt vindue lige over menulinjens niveau med den øverste stribe af det samme indhold
+/// (tegnet i fuld skærmstørrelse og forskudt, så det flugter præcis med fuld skærm nedenunder).
+final class MenuBarCover: NSPanel {
+    var onEscape: () -> Void = {}
+    private let host: NSHostingView<AnyView>
+
+    init(content: AnyView) {
+        host = NSHostingView(rootView: content)
+        super.init(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        level = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue + 1)
+        collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
+        isOpaque = true
+        backgroundColor = .black
+        hasShadow = false
+        hidesOnDeactivate = false
+        isReleasedWhenClosed = false
+        isMovable = false
+        animationBehavior = .none
+        let root = NSView()
+        root.addSubview(host)
+        contentView = root
+    }
+
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown, event.keyCode == 53 { onEscape(); return }   // Esc
+        super.sendEvent(event)
+    }
+
+    func place(on screen: NSScreen, height: CGFloat) {
+        let f = screen.frame
+        setFrame(CGRect(x: f.minX, y: f.maxY - height, width: f.width, height: height), display: false)
+        // Indholdet i fuld størrelse, med toppen flugtende med vinduets top (AppKit: y opad).
+        host.frame = CGRect(x: 0, y: height - f.height, width: f.width, height: f.height)
     }
 }
 

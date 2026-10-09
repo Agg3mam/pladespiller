@@ -105,13 +105,16 @@ enum TurntableImages {
         return shared.image(key("sheen", g, scale)) { RecordRenderer.sheen(g, scale: scale) }
     }
 
-    static func arm(_ g: TurntableGeometry, _ scale: CGFloat) -> CGImage? {
-        shared.image(key("arm", g, scale)) { ArmRenderer.image(g, scale: scale, silhouette: false) }
+    /// Flad: én flad farve (hvid/sort efter lys/mørk tilstand). Andre temaer: realistisk med struktur.
+    static func arm(_ g: TurntableGeometry, _ style: TurntableStyle, _ scale: CGFloat) -> CGImage? {
+        let finish: ArmRenderer.Finish = style.isFlat ? .flat(dark: style.flatArmDark) : .realistic
+        let name = style.isFlat ? (style.flatArmDark ? "armFlatDark" : "armFlatLight") : "arm"
+        return shared.image(key(name, g, scale)) { ArmRenderer.image(g, scale: scale, finish: finish) }
     }
 
     static func armShadow(_ g: TurntableGeometry, _ scale: CGFloat) -> CGImage? {
         shared.image(key("armShadow", g, scale)) {
-            guard let s = ArmRenderer.image(g, scale: scale, silhouette: true) else { return nil }
+            guard let s = ArmRenderer.image(g, scale: scale, finish: .silhouette) else { return nil }
             // Flad: blødere, lavere skygge (ingen skarpe skygger)
             return Drawing.blurred(s, radiusPx: max(1, g.h * (g.flat ? 0.022 : 0.010) * scale))
         }
@@ -154,7 +157,15 @@ enum RecordRenderer {
         // Mellemrum mellem numrene (glattere, mørkere bånd)
         let gaps: [Float] = [0.885, 0.80, 0.735, 0.655, 0.585].map { fi + ($0 - 0.48) / (0.96 - 0.48) * (fo - fi) }
         let gapW: Float = max(0.45, Float(g.h) * 0.0032)
-        let n = ValueNoise(seed: 21), n2 = ValueNoise(seed: 77), n3 = ValueNoise(seed: 5)
+        let n = ValueNoise(seed: 21), n2 = ValueNoise(seed: 77), n3 = ValueNoise(seed: 5), grain = ValueNoise(seed: 91)
+        // Små ridser: korte buer langs rillerne (radius, startvinkel, længde i radianer, styrke). Faste, så de drejer med pladen.
+        let rng = ValueNoise(seed: 17)
+        var k: Int32 = 0
+        func rand() -> Float { k += 1; return rng.hash(k, 3) }
+        let scratches: [(r: Float, a: Float, len: Float, s: Float)] = (0..<16).map { _ in
+            (fi + (fo - fi) * rand(), rand() * 2 * .pi - .pi, 0.04 + rand() * 0.22, 0.03 + rand() * 0.05)
+        }
+        let scratchW = max(0.35, Float(g.h) * 0.0011)
         return Drawing.pixels(size: CGSize(width: side, height: side), scale: scale) { x, y in
             let dx = x - R, dy = y - R
             let r = (dx * dx + dy * dy).squareRoot()
@@ -175,6 +186,11 @@ enum RecordRenderer {
                     let d = abs(f - gp) * R
                     if d < gapW { l = l + (0.046 - l) * smoothstep(gapW, gapW * 0.35, d) }
                 }
+                for s in scratches where abs(r - s.r * R) < scratchW {
+                    var da = ang - s.a
+                    if da < 0 { da += 2 * .pi }
+                    if da < s.len { l += s.s * (1 - abs(r - s.r * R) / scratchW) * smoothstep(0, 0.02, da) * smoothstep(s.len, s.len - 0.02, da) }
+                }
                 // blød overgang ind/ud af rillerne
                 l = l + (0.05 - l) * (1 - smoothstep(fi, fi + 0.012, f)) * 0.6
             } else {
@@ -183,6 +199,8 @@ enum RecordRenderer {
                 let runout = abs(f - (fl + (fi - fl) * 0.55)) * R
                 if runout < 0.35 { l += 0.02 * (1 - runout / 0.35) }
             }
+            // Fint korn i vinylen (pr. pixel).
+            if f > fl { l += (grain.hash(Int32(x * sc), Int32(y * sc)) - 0.5) * 0.014 }
             // Lidt støv, så man kan ane at pladen drejer.
             let cell = n.hash(Int32(x * 0.9), Int32(y * 0.9) &+ 900)
             if cell > 0.9992, f > fl { l += 0.12 }
@@ -330,6 +348,12 @@ enum LabelRenderer {
                 drawLabelText(ctx, title: title, artist: artist, c: c, lr: lr)
             case .blank:
                 paper(ctx, c, lr, tint: 0.97)
+            }
+            // papirkorn (kun de realistiske temaer; Flad er glat)
+            if !g.flat {
+                Drawing.texture(ctx, Drawing.circle(c, lr), Drawing.noise(size: CGSize(width: side, height: side), scale: scale,
+                                                                          fx: 0.9, fy: 0.9, seed: 21, contrast: 1.2),
+                                in: CGRect(x: 0, y: 0, width: side, height: side), alpha: 0.14)
             }
             // presset ring og let skygge ind mod kanten (papir/tryk)
             ctx.drawRadialGradient(Drawing.gradient([(0, Drawing.gray(0, 0)), (0.82, Drawing.gray(0, 0)), (1, Drawing.gray(0, 0.28))]),

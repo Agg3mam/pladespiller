@@ -213,7 +213,13 @@ final class TurntableNSView: NSView {
         turntable.setDim(amount, animated: !first && window != nil)
     }
 
-    private var scale: CGFloat { window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2 }
+    /// Skærmens skala. På fuld skærm (stort dæk) på en almindelig 1x-skærm tegnes billederne i 2x og skaleres pænt ned
+    /// (trilineært): plade, etiket og arm drejes hele tiden, og i 1x ville de blive bløde af omsamplingen.
+    private var scale: CGFloat {
+        let backing = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        if let geometry, geometry.h > 500, backing < 2 { return 2 }
+        return backing
+    }
 
     func configure(geometry g: TurntableGeometry, style s: TurntableStyle) {
         guard g != geometry || s != style else { return }

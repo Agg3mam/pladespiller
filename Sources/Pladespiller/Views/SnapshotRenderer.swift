@@ -572,7 +572,7 @@ extension SnapshotRenderer {
                 check("pladen 16 pt fra top", rec.minY, Layout.padding)
             }
             check("armens leje inde på kroppen (top ≥ luft)", min(g.pivot.y - abs(g.counterweightEnd) - g.counterweightRadius * 0.3, g.flatEdgeGap), g.flatEdgeGap)
-            check("fordybningen inde på kroppen (højre ≤ bredde − luft)", max(g.pivot.x + g.flatRecessRadius, body.width - g.flatEdgeGap), body.width - g.flatEdgeGap)
+            check("bundpladen inde på kroppen (højre ≤ bredde − luft)", max(g.pivot.x + g.basePlateRadius, body.width - g.flatEdgeGap), body.width - g.flatEdgeGap)
             if size != .small {
                 let c = WidgetView.cornerRect(size)
                 check("titel venstre = hjørnefelt", r("titel")?.minX, c.x)

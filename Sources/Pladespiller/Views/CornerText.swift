@@ -138,6 +138,8 @@ struct LyricsView: View {
     let size: CornerText.Size
     let colors: CornerColors
     let width: CGFloat
+    /// Fuld skærm: skriften tegnes i denne størrelse (ikke forstørret som billede, så den står skarpt).
+    var scale: CGFloat = 1
 
     @Environment(\.turntableSnapshot) private var snapshot
     @Environment(\.lyricsTransition) private var transition
@@ -147,9 +149,9 @@ struct LyricsView: View {
 
     private var fontSize: CGFloat {
         switch size {
-        case .small: 11
-        case .medium: 14
-        case .large: 19
+        case .small: 11 * scale
+        case .medium: 14 * scale
+        case .large: 19 * scale
         }
     }
 
@@ -163,18 +165,18 @@ struct LyricsView: View {
 
     var body: some View {
         let idx = index
-        VStack(alignment: .leading, spacing: size == .large ? 4 : 2) {
+        VStack(alignment: .leading, spacing: (size == .large ? 4 : 2) * scale) {
             ZStack(alignment: .bottomLeading) {
                 if let p = transition, let li = idx.line, li > 0 {
                     // Snapshot af et linjeskift midt i overgangen (samme bevægelse som live)
                     let e = 1 - pow(1 - p, 3)                                   // ease-out
-                    lineView(li - 1, word: Int.max).opacity(1 - e).offset(y: -e * 6)
-                    lineView(li, word: idx.word).opacity(e).offset(y: (1 - e) * 8)
+                    lineView(li - 1, word: Int.max).opacity(1 - e).offset(y: -e * 6 * scale)
+                    lineView(li, word: idx.word).opacity(e).offset(y: (1 - e) * 8 * scale)
                 } else {
                     lineView(idx.line, word: idx.word)
                         .id(idx.line ?? -1)
-                        .transition(.asymmetric(insertion: .offset(y: 8).combined(with: .opacity),
-                                                removal: .offset(y: -6).combined(with: .opacity)))
+                        .transition(.asymmetric(insertion: .offset(y: 8 * scale).combined(with: .opacity),
+                                                removal: .offset(y: -6 * scale).combined(with: .opacity)))
                 }
             }
             .animation(.easeOut(duration: 0.35), value: idx.line)

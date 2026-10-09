@@ -8,12 +8,24 @@ import SwiftUI
 /// - Riller og etiket tegnes i skærmens fulde opløsning én gang pr. størrelse; bløde flader i 1x. Store billeder
 ///   frigives når fuld skærm lukkes.
 /// - Alle mål skalerer med vinduets højde (`unit` = højde / 1440), så det ser ens ud på 1080, 1440 og ultrawide.
+private struct FullscreenCoverStripKey: EnvironmentKey { static let defaultValue = false }
+
+extension EnvironmentValues {
+    /// Dækket over menulinjen på fuld skærm-skærmen: viser kun pladespilleren (ingen tekst), så den flugter med
+    /// fuld skærm nedenunder, uden at sangteksten kører to gange.
+    var fullscreenCoverStrip: Bool {
+        get { self[FullscreenCoverStripKey.self] }
+        set { self[FullscreenCoverStripKey.self] = newValue }
+    }
+}
+
 struct FullscreenView: View {
     @Environment(Settings.self) private var settings
     @Environment(NowPlayingStore.self) private var store
     @Environment(\.snapshotLyrics) private var snapshotLyrics
     @Environment(\.snapshotAccessProblem) private var snapshotProblem
     @Environment(\.turntableSnapshot) private var snapshot
+    @Environment(\.fullscreenCoverStrip) private var coverStrip
 
     private var np: NowPlaying? { store.current }
     private var lyrics: LyricsState { snapshotLyrics ?? store.lyrics }
@@ -28,6 +40,7 @@ struct FullscreenView: View {
             let colors = CornerColors.make(style)
             ZStack(alignment: .topLeading) {
                 turntable(size, deck: Self.deck(for: settings.fullscreenLayout, size: size, flat: settings.theme == .flat))
+                if !coverStrip {
                 Group {
                     switch settings.fullscreenLayout {
                     case .lyrics: lyricsSide(size, colors: colors)
@@ -36,16 +49,17 @@ struct FullscreenView: View {
                 }
                 .allowsHitTesting(false)
                 if let problem {
-                    StatusCapsule(text: problem.message, warning: true, action: { store.openAutomationSettings() })
-                        .scaleEffect(Self.unit(size) * 2.6, anchor: .topLeading)
+                    StatusCapsule(text: problem.message, warning: true, action: { store.openAutomationSettings() },
+                                  scale: Self.unit(size) * 2.6)
                         .padding(Self.unit(size) * 48)
+                }
                 }
             }
             .frame(width: size.width, height: size.height, alignment: .topLeading)
             .environment(\.windowIsVisible, snapshot != nil || WindowVisibility.shared.isVisible)
         }
         .background { if snapshot == nil { WindowVisibilityReader() } }
-        .onDisappear { TurntableImages.purgeLarge() }     // frigiv de store billeder når fuld skærm lukkes
+        .onDisappear { if !coverStrip { TurntableImages.purgeLarge() } }     // frigiv de store billeder når fuld skærm lukkes
     }
 
     static func unit(_ size: CGSize) -> CGFloat { max(0.5, size.height / 1440) }
@@ -65,7 +79,7 @@ struct FullscreenView: View {
         func mass(_ d: CGFloat) -> (minX: CGFloat, maxX: CGFloat) {
             let g = TurntableGeometry(size: CGSize(width: d * 3, height: d * 3), cornerRadius: 0,
                                       deck: CGRect(x: 0, y: 0, width: d, height: d), flat: flat)
-            let right = flat ? g.pivot.x + g.flatRecessRadius : g.pivot.x + g.basePlateRadius
+            let right = g.pivot.x + g.basePlateRadius
             return (g.center.x - g.platterRadius, right)
         }
         let W = size.width, H = size.height
@@ -150,9 +164,7 @@ struct FullscreenView: View {
         return VStack(alignment: .leading, spacing: u * 6) {
             if let np {
                 if settings.showLyrics, case .found(let l) = lyrics, l.trackKey == np.trackKey {
-                    LyricsView(np: np, lyrics: l, size: .large, colors: colors, width: width)
-                        .scaleEffect(u * 2.4, anchor: .bottomLeading)
-                        .frame(width: width, alignment: .bottomLeading)
+                    LyricsView(np: np, lyrics: l, size: .large, colors: colors, width: width, scale: u * 2.4)
                     Text("\(TrackStrings.title(np)) · \(TrackStrings.artist(np))")
                         .font(.system(size: u * 28, weight: .semibold))
                         .foregroundStyle(Color(nsColor: colors.secondary))

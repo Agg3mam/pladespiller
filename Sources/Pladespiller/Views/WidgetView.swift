@@ -127,7 +127,7 @@ struct WidgetView: View {
         case .medium:
             // til højre for armens leje, nederst
             let g = TurntableGeometry(size: body, cornerRadius: WidgetMetrics.cornerRadius, deck: standaloneDeck(.medium), flat: true)
-            let x = (g.pivot.x + g.flatRecessRadius + Layout.gap).rounded()
+            let x = (g.pivot.x + g.basePlateRadius + Layout.gap).rounded()
             return (x, body.height - Layout.padding, body.width - Layout.padding - x)
         case .small:
             return (12, body.height - 12, body.width - 24)
@@ -481,6 +481,8 @@ struct StatusCapsule: View {
     let text: String
     let warning: Bool
     var action: () -> Void = {}
+    /// Fuld skærm: tegnes i denne størrelse i stedet for at blive forstørret (skarp tekst).
+    var scale: CGFloat = 1
     var body: some View {
         if warning {
             Button(action: action) { capsule }.buttonStyle(WidgetButtonStyle())
@@ -490,15 +492,15 @@ struct StatusCapsule: View {
     }
 
     private var capsule: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 4 * scale) {
             if warning { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
             Text(text).lineLimit(2).multilineTextAlignment(.leading)
         }
-        .font(.system(size: 10, weight: .semibold))
+        .font(.system(size: 10 * scale, weight: .semibold))
         .foregroundStyle(.white.opacity(0.92))
-        .padding(.horizontal, 7).padding(.vertical, 4)
-        .background(.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .frame(maxWidth: 120, alignment: .leading)
+        .padding(.horizontal, 7 * scale).padding(.vertical, 4 * scale)
+        .background(.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 9 * scale, style: .continuous))
+        .frame(maxWidth: 120 * scale, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
     }
 }

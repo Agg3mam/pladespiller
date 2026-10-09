@@ -51,6 +51,7 @@ final class TurntableLayer {
         for l in allLayers {
             l.actions = noActions
             l.contentsGravity = .resize
+            l.minificationFilter = .trilinear      // billeder i højere opløsning end skærmen skaleres skarpt ned
         }
         root.masksToBounds = false
         container.addSublayer(root)
@@ -158,7 +159,7 @@ final class TurntableLayer {
             ledGlow.contents = TurntableImages.ledGlow(g, scale)
 
             let ab = ArmRenderer.bounds(g), pu = ArmRenderer.pivotUnit(g)
-            for (rot, img, contents) in [(armRot, armImage, TurntableImages.arm(g, scale)),
+            for (rot, img, contents) in [(armRot, armImage, TurntableImages.arm(g, style, scale)),
                                          (shadowRot, shadowImage, TurntableImages.armShadow(g, scale))] {
                 rot.bounds = .zero
                 rot.position = .zero
@@ -169,6 +170,9 @@ final class TurntableLayer {
             }
             armRot.position = up(g.pivot)
             shadowMove.position = up(g.pivot)
+        } else {
+            // Flad: armens farve følger lys/mørk tilstand, også uden at målene ændrer sig.
+            armImage.contents = TurntableImages.arm(g, style, scale)
         }
         CATransaction.commit()
     }

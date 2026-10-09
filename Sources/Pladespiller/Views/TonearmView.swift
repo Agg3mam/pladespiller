@@ -2,7 +2,18 @@ import CoreGraphics
 
 /// Tegner pickuparmen i armens lokale koordinater (omdrejningspunkt = (0,0), armen langs +x, +y mod pladen).
 /// Det samme billede bruges sort og sløret som skygge.
+///
+/// Armen er bygget af rigtige dele (designsystemet "Pladespiller" ▸ Tonearm): kardanleje med åg, rund modvægt med
+/// rifling og nåletryksskive, rundt rør, muffe, vinklet pickuphoved med fingerløft, sort pickup med rød front og nål.
+/// - Træ, Aluminium, Sort, Auto: realistisk, med børstet aluminium og fint korn i de sorte dele.
+/// - Flad: samme former i én flad farve uden struktur – hvid i lys tilstand, sort i mørk (`style.flatArmDark`).
 enum ArmRenderer {
+    enum Finish {
+        case realistic
+        case flat(dark: Bool)
+        case silhouette
+    }
+
     /// Billedets udstrækning i lokale koordinater.
     static func bounds(_ g: TurntableGeometry) -> CGRect {
         let h = g.h
@@ -17,160 +28,190 @@ enum ArmRenderer {
         return CGPoint(x: -b.minX / b.width, y: -b.minY / b.height)
     }
 
-    static func image(_ g: TurntableGeometry, scale: CGFloat, silhouette: Bool) -> CGImage? {
+    static func image(_ g: TurntableGeometry, scale: CGFloat, finish: Finish) -> CGImage? {
         let b = bounds(g)
+        let tex = finish.isRealistic ? Textures(size: b.size, scale: scale) : nil
         return Drawing.image(size: b.size, scale: scale) { ctx in
             ctx.translateBy(x: -b.minX, y: -b.minY)
-            draw(ctx, g, silhouette: silhouette)
+            draw(ctx, g, finish: finish, textures: tex, origin: b.origin)
         }
     }
 
-    static func draw(_ ctx: CGContext, _ g: TurntableGeometry, silhouette s: Bool) {
-        if g.flat { drawFlat(ctx, g, silhouette: s); return }
-        let h = g.h
-        let black = Drawing.gray(0)
-        func metal(_ dark: CGFloat, _ light: CGFloat) -> CGGradient {
-            s ? Drawing.gradient([(0, black), (1, black)])
-              : Drawing.gradient([(0, Drawing.gray(dark)), (0.30, Drawing.gray(light)), (0.55, Drawing.gray((dark + light) / 2 + 0.08)),
-                                  (1, Drawing.gray(dark * 0.75))])
+    /// Strukturer til den realistiske arm, tegnet én gang pr. billede i armbilledets størrelse.
+    struct Textures {
+        let brushed: CGImage?     // fine striber på langs (rør, pickuphoved, åg)
+        let lathe: CGImage?       // drejespor på tværs (modvægt)
+        let grain: CGImage?       // fint korn (sort anodiseret metal og plast)
+        init(size: CGSize, scale: CGFloat) {
+            brushed = Drawing.noise(size: size, scale: scale, fx: 0.012, fy: 0.85, seed: 5)
+            lathe = Drawing.noise(size: size, scale: scale, fx: 0.85, fy: 0.02, seed: 6)
+            grain = Drawing.noise(size: size, scale: scale, fx: 0.7, fy: 0.7, seed: 8, contrast: 1.6)
         }
+    }
 
-        // Bagerste stump + modvægt
-        let w = g.tubeWidth
-        let stub = CGMutablePath()
-        stub.move(to: CGPoint(x: g.counterweightEnd - h * 0.012, y: 0)); stub.addLine(to: .zero)
-        Drawing.stroke(ctx, stub, width: w * 0.75, metal(0.30, 0.75), from: CGPoint(x: 0, y: -w), to: CGPoint(x: 0, y: w))
+    // MARK: Farver (fra designsystemets tokens)
 
+    private static let aluHi = Drawing.color(0.984, 0.984, 0.980)
+    private static let aluMid = Drawing.color(0.776, 0.788, 0.804)
+    private static let aluLow = Drawing.color(0.553, 0.569, 0.592)
+    private static let aluShadow = Drawing.color(0.361, 0.376, 0.400)
+    private static let bearingBlack = Drawing.color(0.114, 0.118, 0.129)
+    private static let bearingRing = Drawing.color(0.271, 0.278, 0.298)
+    private static let cartridgeBody = Drawing.color(0.094, 0.094, 0.102)
+    private static let cartridgeAccent = Drawing.color(0.831, 0.251, 0.184)
+    private static let cantilever = Drawing.color(0.788, 0.659, 0.361)
+
+    static func flatColors(dark: Bool) -> (fill: CGColor, edge: CGColor) {
+        dark ? (Drawing.color(0.122, 0.125, 0.137), Drawing.color(0.227, 0.231, 0.251))
+             : (Drawing.color(0.965, 0.965, 0.953), Drawing.color(0.839, 0.839, 0.816))
+    }
+
+    // MARK: Tegning
+
+    static func draw(_ ctx: CGContext, _ g: TurntableGeometry, finish: Finish, textures tex: Textures?, origin: CGPoint) {
+        let h = g.h, w = g.tubeWidth
+        let texRect = CGRect(origin: origin, size: bounds(g).size)
+        let sil: Bool = if case .silhouette = finish { true } else { false }
+        let flat: (fill: CGColor, edge: CGColor)? = if case .flat(let dark) = finish { flatColors(dark: dark) } else { nil }
+        let black = Drawing.gray(0)
+
+        /// Fyld en del: sort (skygge), flad farve med tynd kant (Flad) eller gradient + struktur (realistisk).
+        func part(_ path: CGPath, _ gradient: @autoclosure () -> CGGradient, across a: CGPoint, _ b: CGPoint,
+                  texture: CGImage? = nil, alpha: CGFloat = 0.5) {
+            if sil { ctx.addPath(path); ctx.setFillColor(black); ctx.fillPath(); return }
+            if let flat {
+                ctx.addPath(path); ctx.setFillColor(flat.fill); ctx.fillPath()
+                ctx.addPath(path); ctx.setStrokeColor(flat.edge); ctx.setLineWidth(max(0.5, h * 0.0018)); ctx.strokePath()
+                return
+            }
+            Drawing.fill(ctx, path, gradient(), from: a, to: b)
+            Drawing.texture(ctx, path, texture, in: texRect, alpha: alpha)
+        }
+        func solid(_ path: CGPath, _ color: CGColor, texture: CGImage? = nil, alpha: CGFloat = 0.5) {
+            part(path, Drawing.gradient([(0, color), (1, color)]), across: .zero, .zero, texture: texture, alpha: alpha)
+        }
+        let cylinder = Drawing.gradient([(0, aluLow), (0.30, aluHi), (0.62, aluMid), (1, aluShadow)])
+        let weight = Drawing.gradient([(0, aluShadow), (0.28, aluHi), (0.55, aluMid), (1, aluShadow)])
+        let real = flat == nil && !sil
+
+        // Bagerste stump og modvægt (rund cylinder, riflet bagtil, nåletryksskive fortil)
+        let stub = CGPath(rect: CGRect(x: g.counterweightEnd + h * 0.005, y: -w * 0.42, width: -g.counterweightEnd - h * 0.005, height: w * 0.84),
+                          transform: nil)
+        part(stub, cylinder, across: CGPoint(x: 0, y: -w * 0.42), CGPoint(x: 0, y: w * 0.42), texture: tex?.brushed, alpha: 0.6)
         let cwR = g.counterweightRadius
         let cw = CGRect(x: g.counterweightEnd, y: -cwR, width: g.counterweightStart - g.counterweightEnd, height: cwR * 2)
-        let cwPath = CGPath(roundedRect: cw, cornerWidth: cwR * 0.25, cornerHeight: cwR * 0.25, transform: nil)
-        Drawing.fill(ctx, cwPath, metal(0.16, 0.62), from: CGPoint(x: 0, y: -cwR), to: CGPoint(x: 0, y: cwR))
-        if !s {
-            // riller på modvægten
-            ctx.setStrokeColor(Drawing.gray(0, 0.35)); ctx.setLineWidth(max(0.3, h * 0.0025))
-            for i in 1...4 {
-                let x = cw.minX + cw.width * CGFloat(i) / 5.5
-                ctx.move(to: CGPoint(x: x, y: -cwR * 0.9)); ctx.addLine(to: CGPoint(x: x, y: cwR * 0.9))
+        let cwPath = CGPath(roundedRect: cw, cornerWidth: cwR * 0.22, cornerHeight: cwR * 0.22, transform: nil)
+        part(cwPath, weight, across: CGPoint(x: 0, y: -cwR), CGPoint(x: 0, y: cwR), texture: tex?.lathe, alpha: 0.55)
+        if real {
+            ctx.setStrokeColor(aluShadow.copy(alpha: 0.6)!); ctx.setLineWidth(max(0.3, h * 0.0012))
+            var x = cw.minX + h * 0.006
+            while x < cw.minX + cw.width * 0.42 {
+                ctx.move(to: CGPoint(x: x, y: -cwR * 0.94)); ctx.addLine(to: CGPoint(x: x, y: cwR * 0.94))
+                x += h * 0.0038
             }
             ctx.strokePath()
-            ctx.addPath(cwPath); ctx.setStrokeColor(Drawing.gray(0, 0.4)); ctx.setLineWidth(0.5); ctx.strokePath()
+            ctx.addPath(cwPath); ctx.setStrokeColor(Drawing.gray(0, 0.3)); ctx.setLineWidth(0.5); ctx.strokePath()
         }
-
-        // Røret
-        let tube = CGMutablePath()
-        tube.move(to: .zero); tube.addLine(to: CGPoint(x: g.tubeLength, y: 0))
-        Drawing.stroke(ctx, tube, width: w, metal(0.42, 0.98), from: CGPoint(x: 0, y: -w / 2), to: CGPoint(x: 0, y: w / 2))
-        if !s {
-            ctx.addPath(tube.copy(strokingWithWidth: w, lineCap: .round, lineJoin: .round, miterLimit: 4))
-            ctx.setStrokeColor(Drawing.gray(0, 0.35)); ctx.setLineWidth(0.4); ctx.strokePath()
-        }
-
-        // Pickuphoved (headshell) i en vinkel mod pladen
-        ctx.saveGState()
-        ctx.translateBy(x: g.tubeLength, y: 0)
-        ctx.rotate(by: g.headshellAngle)
-        let hl = g.headshellLength, hw = g.headshellWidth
-        // fingerløft ud til siden (væk fra pladen)
-        let lift = CGMutablePath()
-        lift.move(to: CGPoint(x: hl * 0.40, y: -hw * 0.45))
-        lift.addQuadCurve(to: CGPoint(x: hl * 0.52, y: -hw * 1.25), control: CGPoint(x: hl * 0.40, y: -hw * 1.05))
-        Drawing.stroke(ctx, lift, width: max(0.7, h * 0.0075), metal(0.45, 0.95), from: CGPoint(x: 0, y: -hw), to: CGPoint(x: 0, y: 0))
-        let shell = CGPath(roundedRect: CGRect(x: -h * 0.012, y: -hw / 2, width: hl + h * 0.012, height: hw),
-                           cornerWidth: hw * 0.18, cornerHeight: hw * 0.18, transform: nil)
-        Drawing.fill(ctx, shell, metal(0.48, 0.96), from: CGPoint(x: 0, y: -hw / 2), to: CGPoint(x: 0, y: hw / 2))
-        if !s {
-            ctx.addPath(shell); ctx.setStrokeColor(Drawing.gray(0, 0.4)); ctx.setLineWidth(0.45); ctx.strokePath()
-            // pickup (mørk) med to skruer
-            let cart = CGPath(roundedRect: CGRect(x: hl * 0.38, y: -hw * 0.34, width: hl * 0.60, height: hw * 0.68),
-                              cornerWidth: hw * 0.1, cornerHeight: hw * 0.1, transform: nil)
-            Drawing.fill(ctx, cart, Drawing.gradient([(0, Drawing.gray(0.22)), (1, Drawing.gray(0.04))]),
-                         from: CGPoint(x: 0, y: -hw / 2), to: CGPoint(x: 0, y: hw / 2))
-            let screwR = max(0.35, hw * 0.07)
-            for y in [-hw * 0.2, hw * 0.2] {
-                ctx.addPath(Drawing.circle(CGPoint(x: hl * 0.52, y: y), screwR)); ctx.setFillColor(Drawing.gray(0.85)); ctx.fillPath()
+        let dw = h * 0.016
+        let dial = CGPath(roundedRect: CGRect(x: g.counterweightStart - dw, y: -cwR * 1.05, width: dw, height: cwR * 2.1),
+                          cornerWidth: dw * 0.25, cornerHeight: dw * 0.25, transform: nil)
+        solid(dial, bearingBlack, texture: tex?.grain, alpha: 0.35)
+        if real {
+            ctx.setLineWidth(max(0.3, h * 0.0012))
+            for i in -4...4 {
+                let y = cwR * CGFloat(i) * 0.2
+                ctx.move(to: CGPoint(x: g.counterweightStart - dw * 0.8, y: y))
+                ctx.addLine(to: CGPoint(x: g.counterweightStart - dw * (i == 0 ? 0.15 : 0.45), y: y))
+                ctx.setStrokeColor(i == 0 ? cartridgeAccent : aluHi)
+                ctx.strokePath()
             }
-            // samlingsmuffe
-            let collar = CGRect(x: -h * 0.016, y: -w * 0.72, width: h * 0.02, height: w * 1.44)
-            Drawing.fill(ctx, CGPath(roundedRect: collar, cornerWidth: w * 0.2, cornerHeight: w * 0.2, transform: nil),
-                         metal(0.15, 0.55), from: CGPoint(x: 0, y: -w), to: CGPoint(x: 0, y: w))
-        }
-        ctx.restoreGState()
-
-        // Lejet ved omdrejningspunktet
-        let hubR = h * 0.033
-        Drawing.fill(ctx, Drawing.circle(.zero, hubR),
-                     s ? Drawing.gradient([(0, black), (1, black)])
-                       : Drawing.gradient([(0, Drawing.gray(0.85)), (0.5, Drawing.gray(0.45)), (1, Drawing.gray(0.18))]),
-                     from: CGPoint(x: -hubR, y: -hubR), to: CGPoint(x: hubR, y: hubR))
-        if !s {
-            ctx.addPath(Drawing.circle(.zero, hubR * 0.62)); ctx.setFillColor(Drawing.gray(0.12)); ctx.fillPath()
-            ctx.addPath(Drawing.circle(.zero, hubR * 0.25)); ctx.setFillColor(Drawing.gray(0.75)); ctx.fillPath()
-            ctx.addPath(Drawing.circle(.zero, hubR)); ctx.setStrokeColor(Drawing.gray(0, 0.45)); ctx.setLineWidth(0.5); ctx.strokePath()
-        }
-    }
-
-    /// Flad arm (referencebilledet): kasseformet hvidt leje i to trin, lige tyndt sølvrør med hvid muffe,
-    /// hvidt vinklet pickuphoved. Bløde former, ingen skarpe kanter.
-    static func drawFlat(_ ctx: CGContext, _ g: TurntableGeometry, silhouette s: Bool) {
-        let h = g.h
-        func fill(_ path: CGPath, _ top: CGFloat, _ bottom: CGFloat, _ a: CGPoint, _ b: CGPoint) {
-            if s { ctx.addPath(path); ctx.setFillColor(Drawing.gray(0)); ctx.fillPath(); return }
-            Drawing.fill(ctx, path, Drawing.gradient([(0, Drawing.gray(top)), (1, Drawing.gray(bottom))]), from: a, to: b)
-        }
-        func edge(_ path: CGPath, _ alpha: CGFloat = 0.10) {
-            guard !s else { return }
-            ctx.addPath(path); ctx.setStrokeColor(Drawing.gray(0, alpha)); ctx.setLineWidth(0.5); ctx.strokePath()
         }
 
-        // Rør (sølv) – tegnes først, så lejet ligger ovenpå
-        let w = g.tubeWidth
-        let tubeStart = g.counterweightStart - h * 0.01
-        let tube = CGPath(roundedRect: CGRect(x: tubeStart, y: -w / 2, width: g.tubeLength - tubeStart, height: w),
+        // Armrøret: rundt aluminium med et lyst stræk langs toppen
+        let tube = CGPath(roundedRect: CGRect(x: -h * 0.01, y: -w / 2, width: g.tubeLength + h * 0.01, height: w),
                           cornerWidth: w / 2, cornerHeight: w / 2, transform: nil)
-        if s { ctx.addPath(tube); ctx.setFillColor(Drawing.gray(0)); ctx.fillPath() } else {
-            Drawing.fill(ctx, tube, Drawing.gradient([(0, Drawing.gray(0.66)), (0.35, Drawing.gray(0.97)), (0.7, Drawing.gray(0.80)),
-                                                      (1, Drawing.gray(0.62))]),
-                         from: CGPoint(x: 0, y: -w / 2), to: CGPoint(x: 0, y: w / 2))
+        part(tube, cylinder, across: CGPoint(x: 0, y: -w / 2), CGPoint(x: 0, y: w / 2), texture: tex?.brushed, alpha: 0.6)
+        if real {
+            ctx.move(to: CGPoint(x: h * 0.03, y: -w * 0.16)); ctx.addLine(to: CGPoint(x: g.tubeLength - h * 0.03, y: -w * 0.16))
+            ctx.setStrokeColor(Drawing.gray(1, 0.6)); ctx.setLineWidth(w * 0.16); ctx.setLineCap(.round); ctx.strokePath()
         }
-        // hvid muffe nær pickuppen
-        let sleeveLen = h * 0.07, sw = w * 1.7
-        let sleeve = CGPath(roundedRect: CGRect(x: g.tubeLength - sleeveLen, y: -sw / 2, width: sleeveLen, height: sw),
-                            cornerWidth: sw * 0.35, cornerHeight: sw * 0.35, transform: nil)
-        fill(sleeve, 1.0, 0.90, CGPoint(x: 0, y: -sw / 2), CGPoint(x: 0, y: sw / 2)); edge(sleeve)
+        // Muffe mellem rør og pickuphoved
+        let collar = CGPath(roundedRect: CGRect(x: g.tubeLength - h * 0.024, y: -w * 0.92, width: h * 0.026, height: w * 1.84),
+                            cornerWidth: w * 0.35, cornerHeight: w * 0.35, transform: nil)
+        solid(collar, bearingBlack, texture: tex?.grain, alpha: 0.35)
 
-        // Pickuphoved: hvid, vinklet blok med lille fingerløft
+        // Pickuphoved (vinklet), fingerløft, pickup med skruer, nålebøjlen stikker lige frem
         ctx.saveGState()
         ctx.translateBy(x: g.tubeLength, y: 0)
         ctx.rotate(by: g.headshellAngle)
         let hl = g.headshellLength, hw = g.headshellWidth
         let lift = CGMutablePath()
-        lift.move(to: CGPoint(x: hl * 0.62, y: hw * 0.42))
-        lift.addLine(to: CGPoint(x: hl * 1.02, y: hw * 0.95))
-        if s {
-            ctx.addPath(lift.copy(strokingWithWidth: max(0.8, h * 0.008), lineCap: .round, lineJoin: .round, miterLimit: 2))
-            ctx.setFillColor(Drawing.gray(0)); ctx.fillPath()
-        } else {
-            ctx.addPath(lift); ctx.setStrokeColor(Drawing.gray(0.86)); ctx.setLineWidth(max(0.8, h * 0.008)); ctx.setLineCap(.round); ctx.strokePath()
+        lift.move(to: CGPoint(x: hl * 0.52, y: -hw * 0.46))
+        lift.addQuadCurve(to: CGPoint(x: hl * 0.8, y: -hw * 1.32), control: CGPoint(x: hl * 0.56, y: -hw * 1.15))
+        ctx.addPath(lift)
+        ctx.setStrokeColor(sil ? black : flat?.edge ?? aluMid)
+        ctx.setLineWidth(max(0.9, h * 0.0075)); ctx.setLineCap(.round); ctx.strokePath()
+        let plate = CGMutablePath()
+        plate.move(to: CGPoint(x: -h * 0.004, y: -w * 0.85))
+        plate.addLine(to: CGPoint(x: hl * 0.28, y: -hw / 2))
+        plate.addLine(to: CGPoint(x: hl, y: -hw / 2))
+        plate.addQuadCurve(to: CGPoint(x: hl, y: hw / 2), control: CGPoint(x: hl * 1.04, y: 0))
+        plate.addLine(to: CGPoint(x: hl * 0.28, y: hw / 2))
+        plate.addLine(to: CGPoint(x: -h * 0.004, y: w * 0.85))
+        plate.closeSubpath()
+        part(plate, Drawing.gradient([(0, aluMid), (0.4, aluHi), (1, aluLow)]), across: CGPoint(x: 0, y: -hw / 2), CGPoint(x: 0, y: hw / 2),
+             texture: tex?.brushed, alpha: 0.5)
+        if real {
+            ctx.addPath(plate); ctx.setStrokeColor(Drawing.gray(0, 0.3)); ctx.setLineWidth(0.45); ctx.strokePath()
+            let cart = CGRect(x: hl * 0.40, y: -hw * 0.34, width: hl * 0.56, height: hw * 0.68)
+            solid(CGPath(roundedRect: cart, cornerWidth: hw * 0.08, cornerHeight: hw * 0.08, transform: nil), cartridgeBody,
+                  texture: tex?.grain, alpha: 0.35)
+            ctx.addPath(CGPath(roundedRect: CGRect(x: cart.minX, y: cart.minY, width: cart.width, height: cart.height * 0.28),
+                               cornerWidth: hw * 0.08, cornerHeight: hw * 0.08, transform: nil))
+            ctx.setFillColor(Drawing.gray(1, 0.08)); ctx.fillPath()
+            ctx.addPath(CGPath(roundedRect: CGRect(x: hl * 0.86, y: cart.minY, width: hl * 0.10, height: cart.height),
+                               cornerWidth: hw * 0.06, cornerHeight: hw * 0.06, transform: nil))
+            ctx.setFillColor(cartridgeAccent); ctx.fillPath()
+            for y in [-hw * 0.17, hw * 0.17] {
+                ctx.addPath(Drawing.circle(CGPoint(x: hl * 0.55, y: y), max(0.45, hw * 0.075))); ctx.setFillColor(aluHi); ctx.fillPath()
+            }
+            ctx.move(to: CGPoint(x: hl * 0.93, y: 0)); ctx.addLine(to: CGPoint(x: hl * 1.02, y: 0))
+            ctx.setStrokeColor(cantilever); ctx.setLineWidth(max(0.5, h * 0.0028)); ctx.setLineCap(.round); ctx.strokePath()
+        } else if let flat {
+            // Flad: kun pickuppens omrids, så formen kan ses
+            ctx.addPath(CGPath(roundedRect: CGRect(x: hl * 0.40, y: -hw * 0.34, width: hl * 0.56, height: hw * 0.68),
+                               cornerWidth: hw * 0.08, cornerHeight: hw * 0.08, transform: nil))
+            ctx.setStrokeColor(flat.edge); ctx.setLineWidth(max(0.5, h * 0.0018)); ctx.strokePath()
         }
-        let shell = CGPath(roundedRect: CGRect(x: -h * 0.012, y: -hw / 2, width: hl + h * 0.012, height: hw),
-                           cornerWidth: hw * 0.22, cornerHeight: hw * 0.22, transform: nil)
-        fill(shell, 1.0, 0.88, CGPoint(x: 0, y: -hw / 2), CGPoint(x: 0, y: hw / 2)); edge(shell)
         ctx.restoreGState()
 
-        // Leje: hvid kasse i to trin (bagerst en smallere, lidt grå "hætte")
-        let cr = g.counterweightRadius
-        let capRect = CGRect(x: g.counterweightEnd, y: -cr * 0.66, width: (g.counterweightStart - g.counterweightEnd) * 0.42, height: cr * 1.32)
-        let cap = CGPath(roundedRect: capRect, cornerWidth: cr * 0.22, cornerHeight: cr * 0.22, transform: nil)
-        fill(cap, 0.95, 0.82, CGPoint(x: 0, y: -cr), CGPoint(x: 0, y: cr)); edge(cap)
-        let boxRect = CGRect(x: g.counterweightEnd + (g.counterweightStart - g.counterweightEnd) * 0.30, y: -cr,
-                             width: (g.counterweightStart - g.counterweightEnd) * 0.70, height: cr * 2)
-        let box = CGPath(roundedRect: boxRect, cornerWidth: cr * 0.24, cornerHeight: cr * 0.24, transform: nil)
-        fill(box, 1.0, 0.90, CGPoint(x: 0, y: -cr), CGPoint(x: 0, y: cr)); edge(box)
-        if !s {
-            // svag samling midt på kassen
-            ctx.move(to: CGPoint(x: boxRect.minX + boxRect.width * 0.45, y: -cr * 0.85))
-            ctx.addLine(to: CGPoint(x: boxRect.minX + boxRect.width * 0.45, y: cr * 0.85))
-            ctx.setStrokeColor(Drawing.gray(0, 0.06)); ctx.setLineWidth(0.5); ctx.strokePath()
+        // Kardanleje: åg med to tapper på tværs, sort hus, aluminiumshætte
+        let b = g.bearingRadius
+        let yoke = CGPath(roundedRect: CGRect(x: -b * 0.42, y: -b - h * 0.012, width: b * 0.84, height: 2 * b + h * 0.024),
+                          cornerWidth: b * 0.2, cornerHeight: b * 0.2, transform: nil)
+        part(yoke, cylinder, across: CGPoint(x: -b * 0.42, y: 0), CGPoint(x: b * 0.42, y: 0), texture: tex?.brushed, alpha: 0.5)
+        let housing = Drawing.circle(.zero, b)
+        part(housing, Drawing.gradient([(0, bearingRing), (1, bearingBlack)]), across: CGPoint(x: -b * 0.6, y: -b * 0.7), CGPoint(x: b * 0.5, y: b * 0.6),
+             texture: tex?.grain, alpha: 0.35)
+        let cap = Drawing.circle(.zero, b * 0.55)
+        if real {
+            Drawing.fill(ctx, cap, Drawing.gradient([(0, aluHi), (0.7, aluMid), (1, aluLow)]),
+                         from: CGPoint(x: -b * 0.4, y: -b * 0.45), to: CGPoint(x: b * 0.5, y: b * 0.5))
+            // drejet hætte: tætte, svage ringe
+            ctx.setLineWidth(max(0.25, h * 0.0008))
+            var r = b * 0.08
+            while r < b * 0.55 {
+                ctx.addPath(Drawing.circle(.zero, r)); r += max(0.6, h * 0.0024)
+            }
+            ctx.setStrokeColor(aluLow.copy(alpha: 0.35)!); ctx.strokePath()
+            ctx.addPath(Drawing.circle(.zero, b * 0.14)); ctx.setFillColor(bearingBlack); ctx.fillPath()
+            ctx.addPath(Drawing.circle(.zero, b - 0.3)); ctx.setStrokeColor(Drawing.gray(0, 0.5)); ctx.setLineWidth(0.6); ctx.strokePath()
+        } else if !sil {
+            part(cap, cylinder, across: .zero, .zero)
         }
     }
+}
+
+private extension ArmRenderer.Finish {
+    var isRealistic: Bool { if case .realistic = self { true } else { false } }
 }

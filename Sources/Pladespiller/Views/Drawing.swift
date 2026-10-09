@@ -48,6 +48,31 @@ enum Drawing {
                        provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
     }
 
+    /// Grå støj til overfladestruktur (uigennemsigtig, middelværdi ca. 0,5). `fx`/`fy` er frekvensen pr. pixel på langs og
+    /// på tværs: (0,02, 0,9) giver fine striber på langs (børstet metal), (0,9, 0,9) giver korn. `contrast` spreder værdierne.
+    static func noise(size: CGSize, scale: CGFloat, fx: Float, fy: Float, seed: UInt32, contrast: Float = 2.2) -> CGImage? {
+        let n = ValueNoise(seed: seed), sc = Float(scale)
+        return pixels(size: size, scale: scale) { x, y in
+            let px = x * sc, py = y * sc
+            let v = n.value(px * fx, py * fy) * 0.65 + n.value(px * fx * 2.1 + 17, py * fy * 2.1 + 5) * 0.35
+            let g = min(max(0.5 + (v - 0.5) * contrast, 0), 1)
+            return SIMD4(g, g, g, 1)
+        }
+    }
+
+    /// Læg en struktur (fx `noise`) oven på en flade: kun inden for `path`, blandet med soft-light.
+    static func texture(_ ctx: CGContext, _ path: CGPath, _ tex: CGImage?, in rect: CGRect, alpha: CGFloat,
+                        mode: CGBlendMode = .softLight) {
+        guard let tex else { return }
+        ctx.saveGState()
+        ctx.addPath(path)
+        ctx.clip()
+        ctx.setBlendMode(mode)
+        ctx.setAlpha(alpha)
+        ctx.draw(tex, in: rect)
+        ctx.restoreGState()
+    }
+
     /// Gaussisk sløring (bruges én gang pr. størrelse til skygger).
     static func blurred(_ image: CGImage, radiusPx: CGFloat) -> CGImage? {
         let ci = CIImage(cgImage: image)
