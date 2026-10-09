@@ -502,51 +502,45 @@ extension SnapshotRenderer {
             if let k = krop { lines.append(String(format: "     krop: x %.2f–%.2f, y %.2f–%.2f", k.minX, k.maxX, k.minY, k.maxY)) }
             switch size {
             case .small:
-                check("krop venstre", krop?.minX, Layout.objectInset)
-                check("krop top", krop?.minY, Layout.objectInset)
-                check("krop højre", krop?.maxX, body.width - Layout.objectInset)
-                check("krop bund", krop?.maxY, body.height - Layout.objectInset)
-                let g = TurntableGeometry(size: CGSize(width: 148, height: 148), cornerRadius: Layout.objectRadius)
-                check("pladens centrum (lodret) = kroppens midte", g.center.y, 74)
-                check("luft armbase → højre kant = luft LED → bund (gitter)", g.deck.maxX - (g.pivot.x + g.basePlateRadius),
-                      g.deck.maxY - (g.ledCenter.y + g.speedButtonRadius))
+                // Pladespilleren fylder hele widgetten (ingen ramme om kroppen).
+                check("krop fylder widgetten (venstre)", krop?.minX, 0)
+                check("krop fylder widgetten (top)", krop?.minY, 0)
+                check("krop fylder widgetten (højre)", krop?.maxX, body.width)
+                check("krop fylder widgetten (bund)", krop?.maxY, body.height)
             case .medium:
-                let col = WidgetView.mediumColumn(body)
-                check("krop venstre", krop?.minX, Layout.objectInset)
-                check("krop top", krop?.minY, Layout.objectInset)
-                check("krop bund", krop?.maxY, body.height - Layout.objectInset)
-                check("titel versaltop = krop top + 8", r("titel")?.minY, Layout.padding)
+                let col = WidgetView.cornerRect(.medium)
+                check("krop fylder widgetten (venstre)", krop?.minX, 0)
+                check("krop fylder widgetten (bund)", krop?.maxY, body.height)
+                check("titel versaltop = 16", r("titel")?.minY, Layout.padding)
                 check("titel venstre = kolonne", r("titel")?.minX, col.x)
                 check("kildeikon venstre = kolonne", r("ikon")?.minX, col.x)
+                check("tid (start) ramme venstre = kolonne", r("tid-start#ramme")?.minX, col.x)
+                check("tid (slut) ramme højre = 16 pt fra kant", r("tid-slut#ramme")?.maxX, body.width - Layout.padding)
                 check("forrige (blæk) venstre = kolonne", r("forrige")?.minX, col.x)
-                check("fremdrift venstre = kolonne", r("fremdrift")?.minX, col.x)
-                check("fremdrift højre = 16 pt fra kant", r("fremdrift")?.maxX, body.width - Layout.padding)
                 check("næste (blæk) højre = 16 pt fra kant", r("næste")?.maxX, body.width - Layout.padding)
-                check("afspil bund = krop bund − 8", r("afspil")?.maxY, body.height - Layout.padding)
+                check("afspil bund = 16 pt fra kant", r("afspil")?.maxY, body.height - Layout.padding)
                 if let a = r("afspil"), let f = r("forrige"), let n = r("næste") {
                     check("forrige lodret midte = afspil midte", f.midY, a.midY)
                     check("næste lodret midte = afspil midte", n.midY, a.midY)
-                    check("afspil vandret midte = kolonnens midte", a.midX, col.x + col.width / 2)
                 }
             case .large:
-                let panel = WidgetView.panelRect(body)
-                let deck = WidgetView.largeDeck(body)
+                let inset = WidgetView.panelInset, pad = WidgetView.panelPadding
                 check("krop fylder widgetten (venstre)", krop?.minX, 0)
                 check("krop fylder widgetten (bund)", krop?.maxY, body.height)
-                check("infobjælke venstre = 8", r("panel#ramme")?.minX, Layout.objectInset)
-                check("infobjælke højre = 8 fra kant", r("panel#ramme")?.maxX, body.width - Layout.objectInset)
-                check("infobjælke bund = 8 fra kant", r("panel#ramme")?.maxY, body.height - Layout.objectInset)
-                check("titel versaltop = bjælke top + 16", r("titel")?.minY, panel.minY + Layout.padding)
-                check("titel venstre = bjælke + 16", r("titel")?.minX, panel.minX + Layout.padding)
-                check("kildeikon venstre = bjælke + 16", r("ikon")?.minX, panel.minX + Layout.padding)
-                check("tid (start) ramme venstre = bjælke + 16", r("tid-start#ramme")?.minX, panel.minX + Layout.padding)
-                check("tid (slut) ramme højre = bjælke − 16", r("tid-slut#ramme")?.maxX, panel.maxX - Layout.padding)
-                check("afspil bund = bjælke bund − 16", r("afspil")?.maxY, panel.maxY - Layout.padding)
-                check("afspil vandret midte = widgettens midte", r("afspil")?.midX, body.width / 2)
-                let g = TurntableGeometry(size: body, cornerRadius: WidgetMetrics.cornerRadius, deck: deck)
-                let massMid = ((g.center.x - g.platterRadius) + (g.pivot.x + g.basePlateRadius)) / 2
-                check("plade+arm vandret midte = widgettens midte", massMid, body.width / 2)
-                check("dæk lodret midte = midt i det synlige over bjælken", deck.midY, panel.minY / 2)
+                let panel = r("panel#ramme")
+                check("stribe venstre = 8", panel?.minX, inset)
+                check("stribe højre = 8 fra kant", panel?.maxX, body.width - inset)
+                check("stribe bund = 8 fra kant", panel?.maxY, body.height - inset)
+                if let panel {
+                    check("titel versaltop = stribe top + 12", r("titel")?.minY, panel.minY + pad)
+                }
+                check("titel venstre = stribe + 12", r("titel")?.minX, inset + pad)
+                check("kildeikon venstre = stribe + 12", r("ikon")?.minX, inset + pad)
+                check("tid (start) ramme venstre = stribe + 12", r("tid-start#ramme")?.minX, inset + pad)
+                check("tid (slut) ramme højre = stribe − 12", r("tid-slut#ramme")?.maxX, body.width - inset - pad)
+                let g = TurntableGeometry(size: body, cornerRadius: WidgetMetrics.cornerRadius, deck: WidgetView.largeDeck(body))
+                check("tallerkenen 16 pt fra venstre kant", g.center.x - g.platterRadius, Layout.padding)
+                check("tallerkenen 16 pt fra top", g.center.y - g.platterRadius, Layout.padding)
             }
             lines.append("")
         }

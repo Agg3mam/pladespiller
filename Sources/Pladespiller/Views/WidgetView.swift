@@ -18,10 +18,11 @@ struct WidgetView: View {
         Group {
             // "Står alene" (standard): kun pladespilleren + hjørnet med sangtekst/titel – i alle temaer.
             switch settings.size {
+            // Pladespilleren fylder altid hele widgetten (ingen ramme om kroppen), i alle temaer.
             case .small:
-                if standalone || flat { standaloneSmall(body) } else { small(body) }
+                standaloneSmall(body)
             case .medium:
-                if standalone { standaloneMedium(body) } else if flat { flatMedium(body) } else { medium(body) }
+                if standalone { standaloneMedium(body) } else { fullMedium(body) }
             case .large:
                 if standalone { standaloneLarge(body) } else { large(body) }
             }
@@ -127,7 +128,8 @@ struct WidgetView: View {
         case .medium:
             // til højre for armens leje, nederst
             let g = TurntableGeometry(size: body, cornerRadius: WidgetMetrics.cornerRadius, deck: standaloneDeck(.medium), flat: true)
-            let x = (g.pivot.x + g.basePlateRadius + Layout.gap).rounded()
+            // luft til armens fod: 12 pt + 6 pt, så lejet aldrig rører titlen
+            let x = (g.pivot.x + g.basePlateRadius + Layout.gap + 6).rounded()
             return (x, body.height - Layout.padding, body.width - Layout.padding - x)
         case .small:
             return (12, body.height - 12, body.width - 24)
@@ -172,20 +174,23 @@ struct WidgetView: View {
             }
     }
 
-    // MARK: Flad med knapper (Mellem): kroppen fylder widgetten; kolonnen står direkte på kroppen
+    // MARK: Mellem med knapper: kroppen fylder widgetten; kolonnen står direkte på kroppen (alle temaer)
 
-    private func flatMedium(_ body: CGSize) -> some View {
+    /// Titel, kunstner og album øverst med fremdrift og tider lige under; knapperne nederst.
+    private func fullMedium(_ body: CGSize) -> some View {
         let c = Self.cornerRect(.medium)
         let colors = CornerColors.make(style)
         return ZStack(alignment: .topLeading) {
             turntable(body, radius: WidgetMetrics.cornerRadius, deck: Self.standaloneDeck(.medium))
             dimmed(
                 VStack(alignment: .leading, spacing: 0) {
-                    TrackText(np: np, problem: problem, width: c.width, showAlbum: false, actions: actions)
-                    Spacer(minLength: 0)
+                    TrackText(np: np, problem: problem, width: c.width, showAlbum: true, albumInline: true, actions: actions)
                     if let np {
-                        SeekBar(np: np, onSeek: actions.seek).probe("fremdrift").padding(.bottom, Layout.progressToButtons)
+                        ProgressRow(np: np, onSeek: actions.seek).padding(.top, 10)
+                        Spacer(minLength: 0)
                         TransportRow(isPlaying: np.isPlaying, spread: true, actions: actions)
+                    } else {
+                        Spacer(minLength: 0)
                     }
                 }
                 .padding(.top, titleTop(Layout.padding))
@@ -198,112 +203,77 @@ struct WidgetView: View {
         .frame(width: body.width, height: body.height, alignment: .topLeading)
     }
 
-    // MARK: Mellem: krop til venstre; titel, kunstner, album, fremdrift og knapper i en kolonne på gitteret
+    // MARK: Stor med knapper: pladespilleren fylder widgetten; en smal stribe nederst (knapper ved hover)
 
-    static func mediumColumn(_ body: CGSize) -> (x: CGFloat, width: CGFloat) {
-        let side = body.height - Layout.objectInset * 2
-        let x = Layout.objectInset + side + Layout.gap
-        return (x, body.width - Layout.padding - x)
-    }
-
-    private func medium(_ body: CGSize) -> some View {
-        let side = body.height - Layout.objectInset * 2
-        let col = Self.mediumColumn(body)
-        return HStack(alignment: .top, spacing: Layout.gap) {
-            turntable(CGSize(width: side, height: side))
-            dimmed(
-                VStack(alignment: .leading, spacing: 0) {
-                    TrackText(np: np, problem: problem, width: col.width, showAlbum: true, actions: actions)
-                    Spacer(minLength: 0)
-                    if let np {
-                        SeekBar(np: np, onSeek: actions.seek).probe("fremdrift")
-                            .padding(.bottom, Layout.progressToButtons)
-                        TransportRow(isPlaying: np.isPlaying, spread: true, actions: actions)
-                    }
-                }
-                // Titlens versalhøjde = kroppens top + 8; knaprækkens bund = kroppens bund − 8.
-                .padding(.top, titleTop(Layout.padding) - Layout.objectInset)
-                .padding(.bottom, Layout.padding - Layout.objectInset)
-                .frame(width: col.width, height: side, alignment: .topLeading)
-            )
-        }
-        .padding(Layout.objectInset)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-
-    // MARK: Stor ("Helt træ", brugerens valg): kroppen fylder hele widgetten; infobjælke nederst
-
-    /// Infobjælken: 8 pt fra kanten, radius 20 (koncentrisk), 16 pt indvendig padding.
+    /// Stribens indryk og indvendige luft. Hjørnet er koncentrisk med widgetten (28 − 8 = 20).
     static let panelInset = Layout.objectInset
-    static let panelPadding = Layout.padding
-    static var panelHeight: CGFloat {
-        // padding + titel (versal→bund) + kunstner + luft + fremdrift + knapper + padding
-        (panelPadding + 18 - Layout.capInset(Layout.titleFont()) + Layout.lineGap + 16 + 12 + 13 + Layout.progressToButtons
-            + Layout.playDiameter + panelPadding).rounded()      // hele punkter: ingen halve pixels
-    }
-    static func panelRect(_ body: CGSize) -> CGRect {
-        CGRect(x: panelInset, y: body.height - panelInset - panelHeight, width: body.width - panelInset * 2, height: panelHeight)
-    }
+    static let panelPadding: CGFloat = 12
 
-    /// Dækket (plade + arm) centreret i den synlige del af kroppen over bjælken – efter den synlige masse
-    /// (fra pladens venstrekant til armbasens højrekant), ikke efter dækkets kvadrat.
+    /// Dækket når knapperne er vist: lidt mindre end når pladespilleren står alene, så striben kun lige
+    /// rører pladens underkant.
     static func largeDeck(_ body: CGSize) -> CGRect {
-        let visibleHeight = panelRect(body).minY
-        let side = visibleHeight - Layout.objectInset * 2
-        let probe = TurntableGeometry(size: CGSize(width: side, height: side), cornerRadius: 0)
-        let massMinX = probe.center.x - probe.platterRadius
-        let massMaxX = probe.pivot.x + probe.basePlateRadius
-        let x = body.width / 2 - (massMinX + massMaxX) / 2
-        return CGRect(x: x.rounded(), y: Layout.objectInset, width: side, height: side)
+        let edge: CGFloat = 0.048, top: CGFloat = 0.128, d: CGFloat = 312
+        return CGRect(x: Layout.padding - edge * d, y: Layout.padding - top * d, width: d, height: d)
     }
 
     private func large(_ body: CGSize) -> some View {
-        let panel = Self.panelRect(body)
-        let inner = panel.width - Self.panelPadding * 2
-        return ZStack(alignment: .topLeading) {
+        let inner = body.width - Self.panelInset * 2 - Self.panelPadding * 2
+        let colors = CornerColors.make(style)
+        let hovering = presentation.isHovering
+        return ZStack(alignment: .bottom) {
             turntable(body, radius: WidgetMetrics.cornerRadius, deck: Self.largeDeck(body))
             dimmed(
                 VStack(alignment: .leading, spacing: 0) {
                     if let np {
                         TrackText(np: np, problem: problem, width: inner, showAlbum: true, albumInline: true, actions: actions)
-                        Spacer(minLength: 0)
-                        ProgressRow(np: np, onSeek: actions.seek).padding(.bottom, Layout.progressToButtons)
-                        TransportRow(isPlaying: np.isPlaying, spread: false, actions: actions).frame(maxWidth: .infinity)
+                        ProgressRow(np: np, onSeek: actions.seek).padding(.top, 8)
+                        if hovering {
+                            TransportRow(isPlaying: np.isPlaying, spread: false, actions: actions)
+                                .frame(maxWidth: .infinity)
+                                .padding(.top, 8)
+                                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        }
                     } else {
-                        // Intet spiller: rolig, centreret i bjælken
-                        Spacer(minLength: 0)
                         TrackText(np: nil, problem: problem, width: inner, centered: true, actions: actions)
                         if problem == nil {
                             Text("Start musik i Spotify eller Musik")
                                 .font(.system(size: Layout.tertiarySize))
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(.secondary)
                                 .frame(maxWidth: .infinity)
                                 .padding(.top, 3)
                         }
-                        Spacer(minLength: 0)
                     }
                 }
-                .padding(.top, np == nil ? Self.panelPadding : titleTop(Self.panelPadding) - 0)
+                .padding(.top, np == nil ? Self.panelPadding : titleTop(Self.panelPadding))
                 .padding([.horizontal, .bottom], Self.panelPadding)
-                .frame(width: panel.width, height: panel.height, alignment: .topLeading)
-                .background { InfoPanelBackground().probe("panel") }
-                .offset(x: panel.minX, y: panel.minY)
+                .frame(width: body.width - Self.panelInset * 2, alignment: .topLeading)
+                .background { InfoPanelBackground(tint: Self.panelTint(style), light: colors.lightBody).probe("panel") }
+                .environment(\.colorScheme, colors.lightBody ? .light : .dark)
+                .padding(Self.panelInset)
+                .animation(.easeInOut(duration: 0.2), value: hovering)
             )
         }
         .frame(width: body.width, height: body.height, alignment: .topLeading)
     }
+
+    /// Stribens farve: kroppens egen farve (træets gennemsnit, metallets grå, Flads farve).
+    static func panelTint(_ style: TurntableStyle) -> SIMD3<Float> {
+        style.flatPalette?.body ?? PlinthRenderer.solidColor(style.plinth)
+    }
 }
 
-/// Infobjælkens flade: røget mørkt glas i mørk tilstand, frostet lyst glas i lys tilstand.
-/// Tæt nok til at teksten er læselig på alle temaer (også lyst aluminium og Auto), uden at blive grumset.
+/// Stribens flade: tonet glas i kroppens egen farve – mørk tone på mørke kroppe, lys tone på lyse – så den hører
+/// til temaet i stedet for at ligne et indsat ark. Tæt nok til at teksten altid kan læses.
 struct InfoPanelBackground: View {
-    @Environment(\.colorScheme) private var scheme
+    var tint: SIMD3<Float>
+    var light: Bool
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: Layout.objectRadius, style: .continuous)
+        let t = light ? tint + (SIMD3<Float>(1, 1, 1) - tint) * 0.72 : tint * 0.32
         shape
-            .fill(scheme == .dark ? Color(white: 0.07).opacity(0.80) : Color(white: 0.985).opacity(0.88))
-            .overlay(shape.strokeBorder(scheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.06), lineWidth: 0.5))
-            .shadow(color: .black.opacity(scheme == .dark ? 0.35 : 0.18), radius: 6, y: 2)
+            .fill(Color(.sRGB, red: Double(t.x), green: Double(t.y), blue: Double(t.z)).opacity(light ? 0.9 : 0.86))
+            .overlay(shape.strokeBorder(light ? Color.black.opacity(0.06) : Color.white.opacity(0.10), lineWidth: 0.5))
+            .shadow(color: .black.opacity(light ? 0.16 : 0.32), radius: 6, y: 2)
     }
 }
 

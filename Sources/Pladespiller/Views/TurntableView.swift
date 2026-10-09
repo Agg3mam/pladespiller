@@ -33,6 +33,8 @@ struct TurntableView: View {
     var scrubbing = false
     /// Fuld skærm: kroppen som én ren farve.
     var solidBody = false
+    /// Fuld skærm: armstøtte, 33/45-knapper og LED.
+    var deckDetails = false
     var onArmClick: () -> Void = {}
     var onRecordClick: () -> Void = {}
     var onSpeedClick: (SpinSpeed) -> Void = { _ in }
@@ -42,7 +44,8 @@ struct TurntableView: View {
 
     var geometry: TurntableGeometry { TurntableGeometry(size: size, cornerRadius: cornerRadius, deck: deck, flat: theme == .flat) }
     var style: TurntableStyle {
-        TurntableStyle.make(theme: theme, artwork: nowPlaying?.artwork, flatColor: flatColor, customHex: flatCustomHex, solidBody: solidBody)
+        TurntableStyle.make(theme: theme, artwork: nowPlaying?.artwork, flatColor: flatColor, customHex: flatCustomHex, solidBody: solidBody,
+                            deckDetails: deckDetails)
     }
 
     var body: some View {
@@ -164,7 +167,7 @@ final class TurntableNSView: NSView {
         let p = CGPoint(x: local.x, y: bounds.height - local.y)          // y nedad som geometrien
         // 33/45-knapperne: små, så klikfladen er mindst 14 pt i diameter.
         let hitR = max(g.speedButtonRadius, 7)
-        for (i, c) in g.speedButtons.enumerated() where hypot(p.x - c.x, p.y - c.y) <= hitR {
+        for (i, c) in g.speedButtons.enumerated() where style?.deckDetails == true && hypot(p.x - c.x, p.y - c.y) <= hitR {
             return .speed(i == 0 ? .rpm33 : .rpm45)
         }
         // Armen (ved sin vinkel lige nu)
@@ -218,9 +221,9 @@ final class TurntableNSView: NSView {
     /// Skærmens skala. På fuld skærm (stort dæk) på en almindelig 1x-skærm tegnes billederne i 2x og skaleres pænt ned
     /// (trilineært): plade, etiket og arm drejes hele tiden, og i 1x ville de blive bløde af omsamplingen.
     private var scale: CGFloat {
+        // Også i widgetten: armens og pladens fine detaljer bliver ellers til pixelgrød på en 1x-skærm.
         let backing = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
-        if let geometry, geometry.h > 500, backing < 2 { return 2 }
-        return backing
+        return max(backing, 2)
     }
 
     func configure(geometry g: TurntableGeometry, style s: TurntableStyle) {

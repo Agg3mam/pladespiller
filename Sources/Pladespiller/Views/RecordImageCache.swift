@@ -123,7 +123,8 @@ enum TurntableImages {
                                       : arm(g, style, scale).flatMap(Drawing.silhouette)
             guard let s = source else { return nil }
             // Flad: blødere, lavere skygge (ingen skarpe skygger)
-            return Drawing.blurred(s, radiusPx: max(1, g.h * (g.flat ? 0.022 : 0.010) * scale))
+            // blød halvskygge (armen svæver), men aldrig så lille at den forsvinder i widgetten
+            return Drawing.blurred(s, radiusPx: max(1.5 * scale, g.h * (g.flat ? 0.022 : 0.013) * scale))
         }
     }
 

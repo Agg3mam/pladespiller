@@ -135,9 +135,9 @@ final class TurntableLayer {
         record.contents = TurntableImages.record(g, palette, scale)
         sheen.contents = TurntableImages.sheen(g, palette, scale)
         // Flad: ingen 33/45-knapper og ingen LED (passer ikke til stilen)
-        speed33.isHidden = style.isFlat
-        speed45.isHidden = style.isFlat
-        ledGlow.isHidden = style.isFlat
+        speed33.isHidden = !style.deckDetails
+        speed45.isHidden = !style.deckDetails
+        ledGlow.isHidden = !style.deckDetails
 
         if geometryChanged {
             platter.frame = square(g.center, half: g.platterRadius + RecordRenderer.platterMargin(g))
@@ -183,11 +183,12 @@ final class TurntableLayer {
     private func armScale(_ lift: Double) -> Double { 1 + 0.045 * lift }
     private func shadowOffset(_ lift: Double) -> CGPoint {
         guard let g = geometry else { return .zero }
-        let dx = g.h * (0.010 + 0.030 * lift), dy = g.h * (0.016 + 0.045 * lift)
+        // Armen svæver over pladen: skyggen ligger tydeligt forskudt væk fra lyset (mindst 2,5/4 pt i små størrelser).
+        let dx = max(2.5, g.h * 0.014) + g.h * 0.030 * lift, dy = max(4, g.h * 0.022) + g.h * 0.045 * lift
         let p = up(g.pivot)
         return CGPoint(x: p.x + dx, y: p.y - dy)
     }
-    private func shadowOpacity(_ lift: Double) -> Double { (0.55 - 0.27 * lift) * ((style?.isFlat ?? false) ? 0.6 : 1) }
+    private func shadowOpacity(_ lift: Double) -> Double { (0.62 - 0.27 * lift) * ((style?.isFlat ?? false) ? 0.6 : 1) }
     private func shadowScale(_ lift: Double) -> Double { 1 + 0.05 * lift }
     private func rootOpacity(_ idle: Double) -> Double { 1 - 0.22 * idle }
     /// "Intet spiller" dæmper normalt hele kroppen. Fylder kroppen hele widgetten (kant til kant), dæmpes kun plade og arm,

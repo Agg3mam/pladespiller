@@ -32,7 +32,7 @@ struct FullscreenView: View {
     private var problem: SourceAccessProblem? { snapshotProblem ?? store.accessProblem }
     private var style: TurntableStyle {
         TurntableStyle.make(theme: settings.theme, artwork: np?.artwork, flatColor: settings.flatColor, customHex: settings.flatCustomHex,
-                            solidBody: true)
+                            deckDetails: true)
     }
 
     var body: some View {
@@ -68,7 +68,7 @@ struct FullscreenView: View {
     private func turntable(_ size: CGSize, deck: CGRect) -> some View {
         TurntableView(size: size, cornerRadius: 0, deck: deck, theme: settings.theme,
                       flatColor: settings.flatColor, flatCustomHex: settings.flatCustomHex, nowPlaying: np, dim: 0,
-                      speed: settings.spinSpeed, scrubbing: false, solidBody: true,
+                      speed: settings.spinSpeed, scrubbing: false, deckDetails: true,
                       onArmClick: { store.playPause() }, onRecordClick: { store.openSourceApp() },
                       onSpeedClick: { settings.spinSpeed = $0 })
     }
@@ -110,7 +110,7 @@ struct FullscreenView: View {
     private func lyricsSide(_ size: CGSize, colors: CornerColors) -> some View {
         let u = Self.unit(size)
         let x = size.width * 0.54
-        let width = size.width * 0.40
+        let width = size.width * 0.42
         return ZStack(alignment: .topLeading) {
             if let np {
                 if case .found(let l) = lyrics, settings.showLyrics, l.trackKey == np.trackKey, !l.lines.isEmpty || l.instrumental {
@@ -141,17 +141,17 @@ struct FullscreenView: View {
                     .offset(x: x)
             }
         }
-        .opacity(np?.isPlaying == false ? 0.6 : 1)            // pause: alt står stille, teksten dæmpes
+        .opacity(np?.isPlaying == false ? 0.8 : 1)            // pause: alt står stille, teksten dæmpes svagt
     }
 
     private func meta(_ np: NowPlaying, unit u: CGFloat, colors: CornerColors, large: Bool) -> some View {
         VStack(alignment: .leading, spacing: u * (large ? 10 : 4)) {
             Text(TrackStrings.title(np))
-                .font(.system(size: u * (large ? 76 : 30), weight: .bold))
+                .font(.system(size: u * (large ? 76 : 40), weight: .bold))
                 .foregroundStyle(Color(nsColor: colors.title))
                 .lineLimit(large ? 3 : 1)
             Text(large ? TrackStrings.artist(np) : [TrackStrings.artist(np), TrackStrings.album(np)].compactMap { $0 }.joined(separator: " · "))
-                .font(.system(size: u * (large ? 40 : 22), weight: .semibold))
+                .font(.system(size: u * (large ? 40 : 28), weight: .semibold))
                 .foregroundStyle(Color(nsColor: colors.secondary))
                 .lineLimit(1)
             if large, let album = TrackStrings.album(np) {
@@ -168,8 +168,11 @@ struct FullscreenView: View {
     private func bottomCorner(_ size: CGSize, colors: CornerColors) -> some View {
         let u = Self.unit(size)
         let pad = u * 64
-        let width = size.width * 0.6
-        return VStack(alignment: .leading, spacing: u * 6) {
+        // Teksten flugter med pladens venstre kant (ikke skærmens hjørne), så den hører til pladespilleren.
+        let deck = Self.deck(for: .turntable, size: size, flat: settings.theme == .flat)
+        let left = max(pad, (deck.minX + deck.width * 0.048).rounded())
+        let width = min(size.width * 0.6, size.width - left - pad)
+        return VStack(alignment: .leading, spacing: u * 16) {
             if let np {
                 if settings.showLyrics, case .found(let l) = lyrics, l.trackKey == np.trackKey {
                     LyricsView(np: np, lyrics: l, size: .large, colors: colors, width: width, scale: u * 2.4)
@@ -193,9 +196,9 @@ struct FullscreenView: View {
                     .foregroundStyle(Color(nsColor: colors.title).opacity(0.55))
             }
         }
-        .opacity(np?.isPlaying == false ? 0.6 : 1)
-        .frame(width: size.width - pad * 2, height: size.height - pad * 2, alignment: .bottomLeading)
-        .offset(x: pad, y: pad)
+        .opacity(np?.isPlaying == false ? 0.8 : 1)
+        .frame(width: size.width - left - pad, height: size.height - pad * 2, alignment: .bottomLeading)
+        .offset(x: left, y: pad)
     }
 }
 
@@ -304,10 +307,11 @@ private struct LyricsStack: View, Animatable {
     private func opacity(_ d: Double) -> Double {
         if d < 0 {
             // tidligere linjer: 1 → 0,32 for den forrige, derefter ud mod 0 opad
-            if d > -1 { return 1 + (0.32 - 1) * -d }
-            return max(0, 0.32 * (1 - (-d - 1) / 1.6))
+            // (mindst ca. 40 % for de nærmeste, så de kan læses på alle farver)
+            if d > -1 { return 1 + (0.42 - 1) * -d }
+            return max(0, 0.42 * (1 - (-d - 1) / 1.6))
         }
-        let future = [1.0, 0.5, 0.38, 0.27, 0.16, 0.0]
+        let future = [1.0, 0.58, 0.46, 0.36, 0.24, 0.0]
         let i = min(Int(d), future.count - 2), f = d - Double(i)
         return future[i] + (future[i + 1] - future[i]) * f
     }

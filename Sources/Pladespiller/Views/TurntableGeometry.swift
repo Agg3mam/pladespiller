@@ -54,7 +54,8 @@ struct TurntableGeometry: Hashable {
     }
     var flatEdgeGap: CGFloat { max(8, h * 0.03) }
     var tubeLength: CGFloat { flat ? h * 0.52 : h * 0.47 }
-    var tubeWidth: CGFloat { flat ? max(1.6, h * 0.017) : max(2, h * 0.021) }
+    /// Realistisk: aldrig tyndere end 3 pt, så røret kan ses som et rør i de små størrelser.
+    var tubeWidth: CGFloat { flat ? max(1.6, h * 0.017) : max(3, h * 0.021) }
     var headshellLength: CGFloat { flat ? h * 0.10 : h * 0.088 }
     var headshellWidth: CGFloat { flat ? h * 0.052 : h * 0.044 }
     var headshellAngle: CGFloat { 24 * .pi / 180 }

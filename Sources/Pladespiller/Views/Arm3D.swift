@@ -26,6 +26,49 @@ enum Arm3D {
         return render(scene, rect: baseRect(g), scale: scale)
     }
 
+    /// Armstøtten (stolpe med gaffel, som armen hviler i, og en løftearm ved siden af), centreret om støttens punkt.
+    static func rest(_ g: TurntableGeometry, scale: CGFloat) -> CGImage? {
+        let scene = makeScene()
+        scene.rootNode.addChildNode(restNode(g))
+        return render(scene, rect: restRect(g), scale: scale)
+    }
+
+    static func restRect(_ g: TurntableGeometry) -> CGRect {
+        let r = g.h * 0.085
+        return CGRect(x: -r, y: -r, width: r * 2, height: r * 2)
+    }
+
+    private static func restNode(_ g: TurntableGeometry) -> SCNNode {
+        let h = g.h, node = SCNNode()
+        let a = g.restAngle
+        let across = CGPoint(x: -sin(a), y: cos(a))          // på tværs af armen (i billedet)
+        let y0 = h * 0.045, tubeR = g.tubeWidth * 0.5
+        // fod og stolpe
+        node.addChildNode(lathe(disc(r: h * 0.02, height: h * 0.008, bevel: h * 0.003), anodizedBlack))
+        node.addChildNode(lathe(disc(r: h * 0.009, height: y0 - tubeR * 1.2, bevel: h * 0.002), anodizedBlack))
+        // gummipude på tværs og to krom-gafler, som røret ligger imellem
+        node.addChildNode(sweep([CGPoint(x: -across.x * tubeR * 2.6, y: -across.y * tubeR * 2.6),
+                                 CGPoint(x: across.x * tubeR * 2.6, y: across.y * tubeR * 2.6)],
+                                radius: h * 0.004, y: y0 - tubeR * 1.2, plasticBlack))
+        for side in [-1.0, 1.0] as [CGFloat] {
+            let pin = lathe(disc(r: h * 0.0032, height: y0 + tubeR * 0.6, bevel: h * 0.0015), chrome)
+            pin.position = SCNVector3(across.x * tubeR * 2.2 * side, 0, across.y * tubeR * 2.2 * side)
+            node.addChildNode(pin)
+        }
+        // løftearm: krom stang ud til siden (væk fra pladen) med sort knop, på en lille sort plade
+        let out = CGPoint(x: across.x < 0 ? -across.x : across.x, y: across.y < 0 ? -across.y : across.y)
+        let lever: [CGPoint] = [CGPoint(x: out.x * h * 0.012, y: out.y * h * 0.012 + h * 0.03),
+                                CGPoint(x: out.x * h * 0.06, y: out.y * h * 0.06 + h * 0.03)]
+        let plate = lathe(disc(r: h * 0.012, height: h * 0.01, bevel: h * 0.003), anodizedBlack)
+        plate.position = SCNVector3(lever[0].x, 0, lever[0].y)
+        node.addChildNode(plate)
+        node.addChildNode(sweep(lever, radius: h * 0.003, y: h * 0.016, chrome))
+        let knob = SCNSphere(radius: h * 0.0075); knob.segmentCount = 32; knob.materials = [plasticBlack]
+        let kn = SCNNode(geometry: knob); kn.position = SCNVector3(lever[1].x, h * 0.016, lever[1].y)
+        node.addChildNode(kn)
+        return node
+    }
+
     static func baseRect(_ g: TurntableGeometry) -> CGRect {
         let r = g.basePlateRadius * 1.08
         return CGRect(x: -r, y: -r, width: r * 2, height: r * 2)

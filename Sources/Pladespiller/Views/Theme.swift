@@ -24,6 +24,8 @@ struct TurntableStyle: Hashable {
     var flatArmDark = false
     /// Fuld skærm: kroppen er én ren farve (materialets farve) i stedet for et foto/mønster strakt over hele skærmen.
     var solidBody = false
+    /// Armstøtte, 33/45-knapper og LED vises (kun fuld skærm; i widgetten er de for små og støder ind i teksten).
+    var deckDetails = false
 
     /// Træsort for tema Træ. Kan ændres når brugeren har valgt (valnød eller lys eg).
     static var woodSpecies: WoodSpecies = .walnut
@@ -35,9 +37,11 @@ struct TurntableStyle: Hashable {
     }
 
     static func make(theme: TurntableTheme, artwork: NSImage?, flatColor: FlatColor = .auto,
-                     customHex: String = "F2B705", flatArmDark: Bool? = nil, solidBody: Bool = false) -> TurntableStyle {
+                     customHex: String = "F2B705", flatArmDark: Bool? = nil, solidBody: Bool = false,
+                     deckDetails: Bool = false) -> TurntableStyle {
         var style = makeBase(theme: theme, artwork: artwork, flatColor: flatColor, customHex: customHex, flatArmDark: flatArmDark)
         style.solidBody = solidBody && !style.isFlat
+        style.deckDetails = deckDetails && !style.isFlat
         return style
     }
 
@@ -112,7 +116,22 @@ struct TurntableStyle: Hashable {
         ns.getHue(&hue, saturation: &sat, brightness: &bri, alpha: &a)
         let out: SIMD3<Float>
         if sat < 0.12 {
-            out = bri > 0.5 ? flatNeutral : SIMD3(0.24, 0.24, 0.25)       // gråt cover: neutral lys eller mørk
+            if bri > 0.5 {
+                out = flatNeutral                                          // lyst gråt cover: neutral, som papir
+            } else {
+                // Mørkt/gråt cover: ingen mudret grå. Lån coverets farvetone fra gennemsnittet, hvis der er en;
+                // ellers den faste gule farve (referencen).
+                let avg = Drawing.averageColor(cg)
+                let an = NSColor(srgbRed: CGFloat(avg.x), green: CGFloat(avg.y), blue: CGFloat(avg.z), alpha: 1)
+                var ah: CGFloat = 0, asat: CGFloat = 0, abri: CGFloat = 0, aa: CGFloat = 0
+                an.getHue(&ah, saturation: &asat, brightness: &abri, alpha: &aa)
+                if asat > 0.15, let o = NSColor(hue: ah, saturation: min(max(asat, 0.45), 0.8), brightness: 0.62, alpha: 1)
+                    .usingColorSpace(.sRGB) {
+                    out = SIMD3(Float(o.redComponent), Float(o.greenComponent), Float(o.blueComponent))
+                } else {
+                    out = FlatPalette.parseHex("F2B705")!
+                }
+            }
         } else {
             let o = NSColor(hue: hue, saturation: min(max(sat, 0.38), 0.82), brightness: min(max(bri, 0.52), 0.92), alpha: 1)
                 .usingColorSpace(.sRGB) ?? ns
@@ -397,23 +416,29 @@ enum PlinthRenderer {
             ctx.setStrokeColor(Drawing.gray(1, 0.85)); ctx.setLineWidth(max(0.4, h * 0.0018)); ctx.strokePath()
         }
 
-        // Armstøtte
+        // Armstøtte, 33/45-knapper og LED kun hvor de kan ses (fuld skærm). I widgetten er de få pixel store
+        // og kolliderer med teksten i hjørnet.
+        guard style.deckDetails else { return }
         let restP = g.world(CGPoint(x: g.armRestLocalX, y: 0), armAngle: g.restAngle)
-        let postR = h * 0.016
-        ctx.saveGState()
-        shadowAt(h * 0.006, h * 0.010, blur: h * 0.012, shadow)
-        ctx.addPath(Drawing.circle(restP, postR)); ctx.setFillColor(Drawing.gray(0.2)); ctx.fillPath()
-        ctx.restoreGState()
-        Drawing.fill(ctx, Drawing.circle(restP, postR),
-                     Drawing.gradient([(0, Drawing.gray(0.55)), (1, Drawing.gray(0.12))]),
-                     from: CGPoint(x: restP.x - postR, y: restP.y - postR), to: CGPoint(x: restP.x + postR, y: restP.y + postR))
-        // lille gaffel på tværs af røret (to metaltappe)
-        let across = CGPoint(x: -sin(g.restAngle), y: cos(g.restAngle))
-        for side in [-1.0, 1.0] as [CGFloat] {
-            let q = CGPoint(x: restP.x + across.x * postR * 1.15 * side, y: restP.y + across.y * postR * 1.15 * side)
-            Drawing.fill(ctx, Drawing.circle(q, postR * 0.42),
-                         Drawing.gradient([(0, Drawing.gray(0.9)), (1, Drawing.gray(0.35))]),
-                         from: CGPoint(x: q.x - postR * 0.4, y: q.y - postR * 0.4), to: CGPoint(x: q.x + postR * 0.4, y: q.y + postR * 0.4))
+        if let rest3D = Arm3D.rest(g, scale: scale) {
+            drawUpright(ctx, rest3D, in: Arm3D.restRect(g).offsetBy(dx: restP.x, dy: restP.y))
+        } else {
+            let postR = h * 0.016
+            ctx.saveGState()
+            shadowAt(h * 0.006, h * 0.010, blur: h * 0.012, shadow)
+            ctx.addPath(Drawing.circle(restP, postR)); ctx.setFillColor(Drawing.gray(0.2)); ctx.fillPath()
+            ctx.restoreGState()
+            Drawing.fill(ctx, Drawing.circle(restP, postR),
+                         Drawing.gradient([(0, Drawing.gray(0.55)), (1, Drawing.gray(0.12))]),
+                         from: CGPoint(x: restP.x - postR, y: restP.y - postR), to: CGPoint(x: restP.x + postR, y: restP.y + postR))
+            // lille gaffel på tværs af røret (to metaltappe)
+            let across = CGPoint(x: -sin(g.restAngle), y: cos(g.restAngle))
+            for side in [-1.0, 1.0] as [CGFloat] {
+                let q = CGPoint(x: restP.x + across.x * postR * 1.15 * side, y: restP.y + across.y * postR * 1.15 * side)
+                Drawing.fill(ctx, Drawing.circle(q, postR * 0.42),
+                             Drawing.gradient([(0, Drawing.gray(0.9)), (1, Drawing.gray(0.35))]),
+                             from: CGPoint(x: q.x - postR * 0.4, y: q.y - postR * 0.4), to: CGPoint(x: q.x + postR * 0.4, y: q.y + postR * 0.4))
+            }
         }
 
         // 33/45-knapperne er egne lag (de kan trykkes ned) – her kun en lille fordybning i kroppen under dem.
@@ -560,10 +585,10 @@ struct FlatPalette: Hashable {
         let white = SIMD3<Float>(1, 0.99, 0.96)
         if luminance > 0.82 { return body * 0.90 + SIMD3(0.02, 0.015, 0) }
         if isLight { return body + (white - body) * 0.70 }
-        return body + (white - body) * 0.32
+        return body + (white - body) * 0.45          // mørke kroppe: tydeligt lysere plade (ikke mudret grå)
     }
     /// Pladens gennemsigtighed (kroppens farve skinner igennem).
-    var recordAlpha: Float { isLight ? 0.94 : 0.90 }
+    var recordAlpha: Float { isLight ? 0.94 : 0.97 }
 
     /// Fordybningen bag armens leje: kroppen en anelse mørkere.
     var recess: SIMD3<Float> { body * 0.94 }

@@ -188,7 +188,7 @@ struct LyricsView: View {
                     .animation(.easeOut(duration: 0.35), value: idx.line)
             }
         }
-        .opacity(np.isPlaying ? 1 : 0.55)                                       // pause: står stille, dæmpet
+        .opacity(np.isPlaying ? 1 : 0.8)                                        // pause: står stille, svagt dæmpet
         .frame(width: width, alignment: .bottomLeading)
         .task(id: taskKey) {
             guard snapshot == nil, windowVisible else { return }
@@ -210,7 +210,14 @@ struct LyricsView: View {
 
     @ViewBuilder private func lineView(_ li: Int?, word: Int?) -> some View {
         let font = Font.system(size: fontSize, weight: .bold)
-        if lyrics.instrumental || li == nil || lyrics.lines[li!].isInstrumental {
+        if li == nil, !lyrics.instrumental {
+            // Før første linje (intro): titlen i stedet for en enlig node.
+            Text(TrackStrings.title(np))
+                .font(font)
+                .foregroundStyle(Color(nsColor: colors.title))
+                .lineLimit(1)
+                .truncationMode(.tail)
+        } else if lyrics.instrumental || li == nil || lyrics.lines[li!].isInstrumental {
             Text("♪")
                 .font(font)
                 .foregroundStyle(Color(nsColor: colors.title).opacity(0.6))
