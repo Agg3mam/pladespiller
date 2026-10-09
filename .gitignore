@@ -5,3 +5,4 @@ snapshots/
 *.xcuserstate
 design/reference.*
 qa/preview/reference-*
+qa/preview/fuldskaerm*
