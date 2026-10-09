@@ -90,3 +90,6 @@ En agent ændrer kun sine egne filer. Ændringer i fælles filer bestilles hos h
   ellers titel + kunstner (`showLyrics = true`). Fælles: `Shared/Lyrics.swift` (`Lyrics`, `LyricsState`), `NowPlayingStore.lyrics`.
 - **2026-10-05 · Lyrics flettet** (musik c90fb1d: `LyricsService` mod LRCLIB, LRC-parser, cache i hukommelse + disk; vindue 2e75640: menu Farve ▸, Vis knapper og tekst, Vis sangtekst, Dæmpning ▸). App.swift holder `store.lyricsEnabled` i takt med `settings.showLyrics`.
 - **2026-10-05 · Flad-tema flettet** (grafik 08c88b9: `Views/CornerText.swift` sangtekst/titel i hjørnet, står alene i alle størrelser, Auto = fremherskende coverfarve).
+- **2026-10-09 · Fuld skærm** (brugerens valg): på den ekstra skærm som "nu spiller"-display; begge visninger (`FullscreenLayout`: Med sangtekst / Kun pladespiller);
+  åbnes fra menuen ▸ Fuld skærm, lukkes med Esc. Fælles: `Settings.fullscreenLayout`, `fullscreenScreenID` (nil = automatisk ekstra skærm), `keepDisplayAwake`.
+  Pladsholdere: `Window/FullscreenController.swift` (Vindue), `Views/FullscreenView.swift` (Grafik); App.swift sætter `panel.fullscreen`.

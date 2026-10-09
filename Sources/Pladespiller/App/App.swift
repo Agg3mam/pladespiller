@@ -73,11 +73,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store.lyricsEnabled = settings.showLyrics
         observeLyricsSetting()
         let settings = settings, store = store
+        let fullscreen = FullscreenController(settings: settings) {
+            FullscreenView()
+                .environment(settings)
+                .environment(store)
+        }
         let panel = WidgetPanelController(settings: settings) {
             WidgetView()
                 .environment(settings)
                 .environment(store)
         }
+        panel.fullscreen = fullscreen
         panel.show()
         self.panel = panel
     }

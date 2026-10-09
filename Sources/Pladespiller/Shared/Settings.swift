@@ -102,6 +102,18 @@ enum FlatColor: String, CaseIterable, Identifiable {
     }
 }
 
+/// Hvad fuld skærm viser.
+enum FullscreenLayout: String, CaseIterable, Identifiable {
+    case lyrics, turntable
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .lyrics: "Med sangtekst"
+        case .turntable: "Kun pladespiller"
+        }
+    }
+}
+
 /// Alle brugerindstillinger, gemt i UserDefaults. "Åbn ved login" gemmes ikke her:
 /// sandheden er `SMAppService.mainApp.status`.
 @Observable
@@ -116,6 +128,9 @@ final class Settings {
         static let flatCustomHex = "pladespiller.flatCustomHex"
         static let showControls = "pladespiller.showControls"
         static let showLyrics = "pladespiller.showLyrics"
+        static let fullscreenLayout = "pladespiller.fullscreenLayout"
+        static let fullscreenScreenID = "pladespiller.fullscreenScreenID"
+        static let keepDisplayAwake = "pladespiller.keepDisplayAwake"
         /// Skærmen widgetten sidst stod på (stabilt skærm-id).
         static let lastScreenID = "pladespiller.lastScreenID"
         /// Placering pr. skærm: `placement.<skærm-id>` → `"x,y"` (vinduets øverste venstre hjørne, AppKit-skærmkoordinater).
@@ -130,6 +145,9 @@ final class Settings {
         /// Brugeren vil have pladespilleren "stor og alene": ingen knapper/fremdrift som standard.
         static let showControls = false
         static let showLyrics = true
+        static let fullscreenLayout: FullscreenLayout = .lyrics
+        /// Hold skærmen tændt mens fuld skærm vises og der spilles.
+        static let keepDisplayAwake = true
         static let colorMode: ColorMode = .automatic
         static let positionLocked = false
         static let spinSpeed: SpinSpeed = .calm
@@ -149,6 +167,10 @@ final class Settings {
     var showControls: Bool { didSet { defaults.set(showControls, forKey: Key.showControls) } }
     /// Vis sangtekst i hjørnet (henter fra LRCLIB). Uden sangtekst vises titel + kunstner i hjørnet.
     var showLyrics: Bool { didSet { defaults.set(showLyrics, forKey: Key.showLyrics) } }
+    var fullscreenLayout: FullscreenLayout { didSet { defaults.set(fullscreenLayout.rawValue, forKey: Key.fullscreenLayout) } }
+    /// Skærmen fuld skærm vises på (stabilt skærm-id). Nil = automatisk: en anden skærm end hovedskærmen, hvis der er en.
+    var fullscreenScreenID: String? { didSet { defaults.set(fullscreenScreenID, forKey: Key.fullscreenScreenID) } }
+    var keepDisplayAwake: Bool { didSet { defaults.set(keepDisplayAwake, forKey: Key.keepDisplayAwake) } }
     var lastScreenID: String? { didSet { defaults.set(lastScreenID, forKey: Key.lastScreenID) } }
 
     init(defaults: UserDefaults = .standard) {
@@ -162,6 +184,9 @@ final class Settings {
         flatCustomHex = defaults.string(forKey: Key.flatCustomHex) ?? Default.flatCustomHex
         showControls = defaults.object(forKey: Key.showControls) as? Bool ?? Default.showControls
         showLyrics = defaults.object(forKey: Key.showLyrics) as? Bool ?? Default.showLyrics
+        fullscreenLayout = defaults.string(forKey: Key.fullscreenLayout).flatMap(FullscreenLayout.init) ?? Default.fullscreenLayout
+        fullscreenScreenID = defaults.string(forKey: Key.fullscreenScreenID)
+        keepDisplayAwake = defaults.object(forKey: Key.keepDisplayAwake) as? Bool ?? Default.keepDisplayAwake
         lastScreenID = defaults.string(forKey: Key.lastScreenID)
     }
 

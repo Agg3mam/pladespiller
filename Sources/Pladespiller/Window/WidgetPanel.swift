@@ -149,6 +149,8 @@ final class WidgetHostingView<Content: View>: NSHostingView<Content> {
 /// Opretter panelet og holder SwiftUI-indholdet. Står for placering, træk, gitter,
 /// skærmskift og størrelsesskift. Ingen timere: alt sker på hændelser.
 final class WidgetPanelController {
+    /// Sættes af App.swift; menuen ▸ "Fuld skærm" bruger den.
+    var fullscreen: FullscreenController?
     private let settings: Settings
     private let style = WidgetStyle()
     private let panel: WidgetPanel
