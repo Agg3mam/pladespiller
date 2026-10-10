@@ -127,7 +127,8 @@ final class LyricsClock {
             set(np.trackKey, Self.index(lyrics, at: pos))
             guard np.isPlaying, let next = Self.nextBoundary(lyrics, after: pos) else { return }
             let wait = max(0.02, next - pos + 0.01)
-            try? await Task.sleep(for: .seconds(wait))
+            // Præcis opvågning: uden en lille tolerance må systemet samle vækninger og komme for sent.
+            try? await Task.sleep(for: .seconds(wait), tolerance: .milliseconds(10))
         }
     }
 }

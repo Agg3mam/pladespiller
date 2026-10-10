@@ -26,6 +26,8 @@ struct FullscreenView: View {
     @Environment(\.snapshotAccessProblem) private var snapshotProblem
     @Environment(\.turntableSnapshot) private var snapshot
     @Environment(\.fullscreenCoverStrip) private var coverStrip
+    /// Fuld skærm-vinduets egen synlighed (ikke widgettens).
+    private var visibility: WindowVisibility { .fullscreen }
 
     private var np: NowPlaying? { store.current }
     private var lyrics: LyricsState { snapshotLyrics ?? store.lyrics }
@@ -63,9 +65,10 @@ struct FullscreenView: View {
                     ChristmasOverlay(scale: Self.unit(size) * 2.2).padding(.top, 40)
                 }
             }
-            .environment(\.windowIsVisible, snapshot != nil || WindowVisibility.shared.isVisible)
+            .environment(\.windowIsVisible, snapshot != nil || visibility.isVisible)
         }
-        .background { if snapshot == nil { WindowVisibilityReader() } }
+        // Kun selve fuld skærm-vinduet læser sin synlighed (ikke dækket over menulinjen).
+        .background { if snapshot == nil, !coverStrip { WindowVisibilityReader(target: visibility) } }
         .onDisappear { if !coverStrip { TurntableImages.purgeLarge() } }     // frigiv de store billeder når fuld skærm lukkes
     }
 

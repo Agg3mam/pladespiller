@@ -2,20 +2,27 @@ import AppKit
 import Observation
 import SwiftUI
 
-/// Læser om widgettens vindue er synligt (occlusion), så tidslabel og rulletekst kan stoppe når det er dækket (QA N9).
-/// Ingen polling: kun NSWindow.didChangeOcclusionStateNotification.
-/// Der er kun ét widgetvindue pr. app (én kopi kører ad gangen), så tilstanden er fælles.
+/// Læser om et vindue er synligt (occlusion), så tidslabel, rulletekst og sangtekst kan stoppe når det er dækket
+/// (QA N9). Ingen polling: kun NSWindow.didChangeOcclusionStateNotification.
+/// Hvert vindue har sin EGEN tilstand: widgetten bruger `shared`, fuld skærm sin egen. (Før delte de én, så en
+/// dækket widget kunne stoppe sangteksten på fuld skærm og omvendt.)
 @Observable
 final class WindowVisibility {
+    /// Widgettens vindue.
     static let shared = WindowVisibility()
+    /// Fuld skærm-vinduet.
+    static let fullscreen = WindowVisibility()
     var isVisible = true
 }
 
 struct WindowVisibilityReader: NSViewRepresentable {
+    var target: WindowVisibility = .shared
+
     func makeNSView(context: Context) -> ReaderView {
         let v = ReaderView()
+        let target = target
         v.onChange = { visible in
-            if WindowVisibility.shared.isVisible != visible { WindowVisibility.shared.isVisible = visible }
+            if target.isVisible != visible { target.isVisible = visible }
         }
         return v
     }
