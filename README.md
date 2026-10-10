@@ -28,9 +28,10 @@ Fortryder du en tilladelse, kan du ændre den i Systemindstillinger ▸ Anonymit
   - Lille / Mellem / Stor
   - Tema: Flad, Træ, Aluminium, Sort eller Auto (farven hentes fra coveret)
   - Farve (til Flad): Auto fra coveret, ti faste farver eller "Vælg farve…"
-  - Hastighed: Langsom, Rolig, 33⅓ eller 45 o/min
+  - Hastighed: Meget langsom, Langsom, Rolig, 33⅓ eller 45 o/min
   - Dæmpning: følger Apples widgetstil, eller altid fuld farve/dæmpet
   - Vis knapper og tekst, Vis sangtekst
+  - Åbn som vindue (se nedenfor)
   - Fuld skærm (se nedenfor)
   - Julestemning: Til, Fra eller Automatisk i julen (1. dec–6. jan), og Sne på skrivebordet
   - Sprog: Dansk, English eller Automatisk (som Macen)
@@ -41,6 +42,10 @@ I temaet Flad er armen hvid, når macOS står i lys tilstand, og sort i mørk ti
 ## Julestemning
 
 En lyskæde med store glaspærer, der blinker blødt hver for sig, og sne, der falder i tre dybder og svajer. Den lægger sig oven på det tema, du har valgt, og virker også på fuld skærm. Med **Sne på skrivebordet** falder sneen også over hele skrivebordet, bag dine vinduer og ikoner (man klikker lige igennem den). Det hele kører i Core Animation, så appen bruger ikke CPU på det.
+
+## Som vindue
+
+Vælg **Åbn som vindue** i menuen. Pladespilleren med sangtekst åbner i et almindeligt vindue, som du kan flytte, ændre størrelse på og lægge foran andre vinduer. Mens vinduet er åbent, har appen et ikon i Dock og kan findes med ⌘-Tab. **⌘W** lukker vinduet; widgetten kører videre.
 
 ## Fuld skærm
 
