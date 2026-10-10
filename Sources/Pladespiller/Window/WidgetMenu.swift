@@ -7,6 +7,8 @@ final class WidgetMenu {
     private let settings: Settings
     /// Fuld skærm (sættes af `WidgetPanelController`). Nil → punkterne vises ikke.
     var fullscreen: FullscreenController?
+    /// Pladespilleren som almindeligt vindue (sættes af `WidgetPanelController`/menulinjen).
+    var playerWindow: PlayerWindowController?
     /// Tilsluttede skærme (id, navn); kan erstattes i selvtesten.
     var screens: () -> [(id: String, name: String)] = {
         NSScreen.screens.map { ($0.stableID, $0.localizedName) }
@@ -78,6 +80,12 @@ final class WidgetMenu {
         menu.addItem(note(L("Henter fra LRCLIB på nettet", "Fetched from LRCLIB online")))
         menu.addItem(.separator())
 
+        if let playerWindow {
+            menu.addItem(item(L("Åbn som vindue", "Open as window"), checked: playerWindow.isShowing) { [weak playerWindow] in
+                // Efter menuens sporingsløkke.
+                DispatchQueue.main.async { MainActor.assumeIsolated { playerWindow?.toggle() } }
+            })
+        }
         if let fullscreen {
             addFullscreenItems(to: menu, fullscreen)
             menu.addItem(.separator())

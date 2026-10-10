@@ -12,6 +12,8 @@ final class WindowVisibility {
     static let shared = WindowVisibility()
     /// Fuld skærm-vinduet.
     static let fullscreen = WindowVisibility()
+    /// Pladespilleren som almindeligt vindue.
+    static let playerWindow = WindowVisibility()
     var isVisible = true
 }
 

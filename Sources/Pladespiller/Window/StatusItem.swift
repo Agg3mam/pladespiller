@@ -8,9 +8,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let widgetMenu: WidgetMenu
     private let menu = NSMenu()
 
-    init(settings: Settings, fullscreen: FullscreenController?) {
+    init(settings: Settings, fullscreen: FullscreenController?, playerWindow: PlayerWindowController? = nil) {
         widgetMenu = WidgetMenu(settings: settings)
         widgetMenu.fullscreen = fullscreen
+        widgetMenu.playerWindow = playerWindow
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         super.init()
         if let button = item.button {

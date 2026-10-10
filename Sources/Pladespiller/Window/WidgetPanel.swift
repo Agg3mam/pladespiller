@@ -151,6 +151,7 @@ final class WidgetHostingView<Content: View>: NSHostingView<Content> {
 final class WidgetPanelController {
     /// Sættes af App.swift; menuen ▸ "Fuld skærm" bruger den.
     var fullscreen: FullscreenController? { didSet { menu.fullscreen = fullscreen } }
+    var playerWindow: PlayerWindowController? { didSet { menu.playerWindow = playerWindow } }
     private let settings: Settings
     private let style = WidgetStyle()
     private let panel: WidgetPanel

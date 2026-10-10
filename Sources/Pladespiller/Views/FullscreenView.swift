@@ -26,8 +26,8 @@ struct FullscreenView: View {
     @Environment(\.snapshotAccessProblem) private var snapshotProblem
     @Environment(\.turntableSnapshot) private var snapshot
     @Environment(\.fullscreenCoverStrip) private var coverStrip
-    /// Fuld skærm-vinduets egen synlighed (ikke widgettens).
-    private var visibility: WindowVisibility { .fullscreen }
+    /// Vinduets egen synlighed (fuld skærm eller "Åbn som vindue", aldrig widgettens).
+    var visibility: WindowVisibility = .fullscreen
 
     private var np: NowPlaying? { store.current }
     private var lyrics: LyricsState { snapshotLyrics ?? store.lyrics }
@@ -72,7 +72,8 @@ struct FullscreenView: View {
         .onDisappear { if !coverStrip { TurntableImages.purgeLarge() } }     // frigiv de store billeder når fuld skærm lukkes
     }
 
-    static func unit(_ size: CGSize) -> CGFloat { max(0.5, size.height / 1440) }
+    /// Alle mål følger højden (1440 = 1). Også i et lille vindue ("Åbn som vindue"), derfor en lav nedre grænse.
+    static func unit(_ size: CGSize) -> CGFloat { max(0.3, size.height / 1440) }
 
     private func turntable(_ size: CGSize, deck: CGRect) -> some View {
         TurntableView(size: size, cornerRadius: 0, deck: deck, theme: settings.theme,
@@ -180,7 +181,12 @@ struct FullscreenView: View {
         // Teksten flugter med pladens venstre kant (ikke skærmens hjørne), så den hører til pladespilleren.
         let deck = Self.deck(for: .turntable, size: size, flat: settings.theme == .flat)
         let left = max(pad, (deck.minX + deck.width * 0.048).rounded())
-        let width = min(size.width * 0.6, size.width - left - pad)
+        var width = min(size.width * 0.6, size.width - left - pad)
+        if settings.theme != .flat {
+            // Stop før 33/45-knapperne og lampen, så teksten aldrig ligger oven i dem.
+            let g = TurntableGeometry(size: size, cornerRadius: 0, deck: deck)
+            width = min(width, g.speedButtons[0].x - g.speedButtonRadius * 1.6 - u * 24 - left)
+        }
         return VStack(alignment: .leading, spacing: u * 16) {
             if let np {
                 if settings.showLyrics, case .found(let l) = lyrics, l.trackKey == np.trackKey {
@@ -205,6 +211,7 @@ struct FullscreenView: View {
                     .foregroundStyle(Color(nsColor: colors.title).opacity(0.55))
             }
         }
+        .frame(width: max(0, width), alignment: .leading)
         .opacity(np?.isPlaying == false ? 0.8 : 1)
         .frame(width: size.width - left - pad, height: size.height - pad * 2, alignment: .bottomLeading)
         .offset(x: left, y: pad)

@@ -64,6 +64,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panel: WidgetPanelController?
     /// Ikonet i menulinjen med indstillingerne.
     private var statusItem: StatusItemController?
+    /// Pladespilleren som almindeligt vindue.
+    private var playerWindow: PlayerWindowController?
     /// Sne på skrivebordet i julestemningen.
     private var desktopSnow: DesktopSnowController?
 
@@ -89,12 +91,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .environment(store)
         }
         panel.fullscreen = fullscreen
+        let playerWindow = PlayerWindowController {
+            FullscreenView(visibility: .playerWindow)
+                .environment(settings)
+                .environment(store)
+        }
+        panel.playerWindow = playerWindow
+        self.playerWindow = playerWindow
         panel.show()
         self.panel = panel
-        statusItem = StatusItemController(settings: settings, fullscreen: fullscreen)
+        statusItem = StatusItemController(settings: settings, fullscreen: fullscreen, playerWindow: playerWindow)
         desktopSnow = DesktopSnowController(settings: settings)
         // `--fullscreen`: åbn fuld skærm ved start (til gennemsyn og test uden at klikke i menuen).
         if CommandLine.arguments.contains("--fullscreen") { fullscreen.show() }
+        // `--window`: åbn pladespilleren som vindue ved start (til gennemsyn og test).
+        if CommandLine.arguments.contains("--window") { playerWindow.show() }
     }
 
     /// Hold storens sangtekst-hentning i takt med menuvalget "Vis sangtekst".

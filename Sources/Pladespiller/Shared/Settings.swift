@@ -41,10 +41,11 @@ enum ColorMode: String, CaseIterable, Identifiable {
 
 /// Hvor hurtigt pladen drejer.
 enum SpinSpeed: String, CaseIterable, Identifiable {
-    case slow, calm, rpm33, rpm45
+    case verySlow, slow, calm, rpm33, rpm45
     var id: String { rawValue }
     var title: String {
         switch self {
+        case .verySlow: L("Meget langsom", "Very slow")
         case .slow: L("Langsom", "Slow")
         case .calm: L("Rolig", "Calm")
         case .rpm33: L("33⅓ o/min (ægte)", "33⅓ rpm (real)")
@@ -54,6 +55,7 @@ enum SpinSpeed: String, CaseIterable, Identifiable {
     /// Sekunder pr. omgang.
     var secondsPerRevolution: TimeInterval {
         switch self {
+        case .verySlow: 5.0      // 12 o/min
         case .slow: 3.0          // 20 o/min
         case .calm: 2.25         // ≈27 o/min
         case .rpm33: 1.8         // 33⅓ o/min
