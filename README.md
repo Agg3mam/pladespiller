@@ -32,10 +32,15 @@ Fortryder du en tilladelse, kan du ændre den i Systemindstillinger ▸ Anonymit
   - Dæmpning: følger Apples widgetstil, eller altid fuld farve/dæmpet
   - Vis knapper og tekst, Vis sangtekst
   - Fuld skærm (se nedenfor)
+  - Julestemning: Til, Fra eller Automatisk i julen (1. dec–6. jan), og Sne på skrivebordet
   - Sprog: Dansk, English eller Automatisk (som Macen)
   - Lås placering, Åbn ved login, Fjern widget
 
 I temaet Flad er armen hvid, når macOS står i lys tilstand, og sort i mørk tilstand. I de andre temaer er armen en lille 3D-model med ægte metal og lys.
+
+## Julestemning
+
+En lyskæde med store glaspærer, der blinker blødt hver for sig, og sne, der falder i tre dybder og svajer. Den lægger sig oven på det tema, du har valgt, og virker også på fuld skærm. Med **Sne på skrivebordet** falder sneen også over hele skrivebordet, bag dine vinduer og ikoner (man klikker lige igennem den). Det hele kører i Core Animation, så appen bruger ikke CPU på det.
 
 ## Fuld skærm
 
