@@ -21,6 +21,7 @@ Fortryder du en tilladelse, kan du ændre den i Systemindstillinger ▸ Anonymit
 
 - **Træk** widgetten for at flytte den. Den falder på plads i gitteret.
 - **Klik på armen:** afspil/pause. **Klik på pladen:** åbn musikappen.
+- **Cover:** hentes fra Spotify eller Musik. Kan appen ikke få det derfra (nyere Spotify svarer ikke på AppleScript, og streamede Apple Music-sange udleverer ikke deres cover), slår den det op hos Spotify ud fra sangens id eller hos Apple (iTunes-søgning) ud fra titel, kunstner og album. Kun én gang pr. sang.
 - **Sangtekst:** står i hjørnet og følger sangen linje for linje. Teksterne hentes fra [LRCLIB](https://lrclib.net). Kun sangens titel og kunstner sendes dertil. Kan slås fra i menuen.
 - **Knapper og tekst** (slås til i menuen): titel, kunstner, fremdrift med tider og forrige/afspil/næste. I Stor kommer knapperne frem, når musen er over widgetten.
 - **Spol:** klik eller træk på fremdriftslinjen.
