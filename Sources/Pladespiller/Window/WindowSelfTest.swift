@@ -40,8 +40,16 @@ enum WindowSelfTest {
             let r = GridSnapper.snap(dropped, visibleFrame: visible, anchors: apple, pitch: p)
             let overlaps = apple.contains { $0.intersection(r).width > 1 && $0.intersection(r).height > 1 }
             check("ingen overlap med Apple", !overlaps && visible.contains(r), "\(r)")
-            check("på Apples gitter", (r.minX - 313).truncatingRemainder(dividingBy: p) == 0
+            let onColumn = (r.minX - 313).truncatingRemainder(dividingBy: p) == 0
+                || r.midX == visible.midX.rounded()   // eller den centrerede kolonne under notchen
+            check("på Apples gitter", onColumn
                   && (apple[0].maxY - r.maxY).truncatingRemainder(dividingBy: p) == 0, "\(r)")
+        }
+        // 2b. Sluppet nær midten øverst uden Apple-widgets → centreret under notchen, øverste række.
+        do {
+            let dropped = cg(640, 60, 360, 180)
+            let r = GridSnapper.snap(dropped, visibleFrame: visible, anchors: [], pitch: p)
+            check("centreret under notchen", r.midX == visible.midX.rounded() && r.maxY == visible.maxY, "\(r)")
         }
         // 3. Under Kalender (række 2) → x=313, y=398 (CG).
         do {

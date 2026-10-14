@@ -76,6 +76,15 @@ nonisolated enum GridSnapper {
             // En celle i ring k er mindst (k-1)·p væk; stop når ingen længere ring kan slå den.
             if best != nil, CGFloat(radius) * p > bestDistance + p { break }
         }
+        // Ekstra kolonne: vandret centreret på skærmen (under notchen), i gitterets rækker.
+        let centerX = (visibleFrame.midX - w / 2).rounded()
+        let rows = Int((visibleFrame.height / p).rounded(.up)) + 1
+        for j in (j0 - rows)...(j0 + rows) {
+            let r = CGRect(x: centerX, y: grid.top - CGFloat(j) * p - h, width: w, height: h)
+            guard isFree(r) else { continue }
+            let d = hypot(r.minX - frame.minX, r.minY - frame.minY)
+            if d < bestDistance { bestDistance = d; best = r }
+        }
         return best ?? clamp(frame, into: visibleFrame)
     }
 
