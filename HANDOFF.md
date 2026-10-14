@@ -14,7 +14,7 @@ Det er ikke en WidgetKit-widget. Det er en baggrundsapp (`LSUIElement`) med et k
 
 **Om brugeren:** brugeren er ikke udvikler. Skriv **på dansk og i et let sprog**, forklar hvad du gør, og sig præcis hvad brugeren skal klikke på eller godkende. Spørg, før du gætter på design- og produktvalg.
 
-**Brugerens Mac:** macOS 27.2, Apple Silicon. Der er kun Command Line Tools (ingen Xcode, og brugeren skal ikke bedes om at installere det). Der er to eksterne skærme på 2560×1440, hvoraf den ene kører 144 Hz. I Udseende er "Ikon- og widgetstil" sat til **Mørk** (`AppleIconAppearanceTheme=RegularDark`), og widgetstilen er Fuld farve (`com.apple.widgets widgetAppearance=1`).
+**Brugerens Mac:** macOS 27.2, Apple Silicon. Xcode 27 er installeret (2026-10-10) og valgt med `xcode-select`, men appen bygges stadig med SwiftPM (`build.sh`). Der er to eksterne skærme på 2560×1440, hvoraf den ene kører 144 Hz. I Udseende er "Ikon- og widgetstil" sat til **Mørk** (`AppleIconAppearanceTheme=RegularDark`), og widgetstilen er Fuld farve (`com.apple.widgets widgetAppearance=1`).
 
 ---
 
@@ -35,7 +35,7 @@ open ~/Applications/Pladespiller.app --args --log   # rigtig musik + log
 | `--mock` | testdata i en løkke på 34 s (afspil, pause, ny sang, uden cover, intet spiller) |
 | `--log` | den installerede app logger til `~/Library/Logs/Pladespiller/nowplaying.log` |
 | `--render-snapshots <mappe>` | tegner alle visninger til PNG uden vindue; kør også layout-, spin- og live-tjek |
-| `--window-selftest` | 71 tjek af gitter, menu, fuld skærm osv. ("alt OK") |
+| `--window-selftest` | 71 tjek af gitter, menu, fuld skærm osv. ("alt OK" — men menu-tjekkene fejler, når appens sprog er engelsk; de forventer danske menupunkter) |
 | `--nowplaying-log --selftest` | 95 tjek af kilder, LRC-parser, LRCLIB-backoff og cache |
 | `--nowplaying-log [--cmd playpause\|next\|previous\|seek:<s>] [--app spotify\|music]` | live-log og kommandoer fra Terminal (så får Terminal tilladelsen, ikke appen) |
 | `--lyrics "Titel" "Kunstner" [sek]` | hent sangtekst fra LRCLIB og print den |
@@ -52,7 +52,7 @@ open ~/Applications/Pladespiller.app --args --log   # rigtig musik + log
 
 - **Vindue:**
   - Ligger på niveau −2147483601, ligesom Apples widgets.
-  - Kan trækkes med en grænse på 4 pt, før det tæller som træk, og falder på plads i et gitter på 180 pt, der flugter med Apples widgets.
+  - Kan trækkes med en grænse på 4 pt, før det tæller som træk, og falder på plads i et gitter på 180 pt, der flugter med Apples widgets. Derudover er der en ekstra kolonne, der er vandret centreret på skærmen (under notchen), så den kan stå præcis i midten (2026-10-14).
   - Placeringen gemmes pr. skærm som øverste venstre hjørne, og den finder sin plads igen ved skærmskift, dvale og login.
   - Udseendet er målt på brugerens widgets: indryk 8 pt, radius 28 continuous, en svag lys kant og ingen skygge.
 - **Størrelser:** Lille 164×164, Mellem 344×164 og Stor 344×344 pt synlig flade.
@@ -194,3 +194,14 @@ Faldgruber, vi har mødt:
 ## 9. Hvem lavede hvad (indtil nu)
 
 Fem agenter plus hovedagenten (Vindue, Grafik, Musikdata, Build og QA), og én hjælpeagent hos QA til kodegennemgang. Der er 68 commits på `main`.
+
+---
+
+## 10. Fravalgt: rigtig WidgetKit-widget (2026-10-10)
+
+Brugeren overvejede en ægte Apple-widget (WidgetKit) ved siden af den nuværende, men **droppede det**. Den ville kræve, at appen stadig kører og leverer data, og den kan hverken vise sangtekst, fuld skærm eller en jævnt drejende plade. Forsøget viste:
+- En widget-extension bygget med `swiftc` går ned i `_EXRunningExtension`. Den skal bygges af **Xcode** (`xcodebuild`), ad hoc-signeret (`CODE_SIGN_IDENTITY = "-"`). Med det selvsignerede certifikat afviser chronod den ("not entitled to run in the App Sandbox").
+- Data kan deles via `com.apple.security.temporary-exception.files.home-relative-path.read-only`, og appen kan genindlæse widgetten med `WidgetCenter.reloadAllTimelines()`.
+- Tidslinje-trin hvert 2. sekund med `.animation(.linear(duration: 2))` får pladen til at dreje, men det koster NotificationCenter ca. 15–20 % CPU.
+- Efter en ny build skal den gamle extension-proces stoppes (`pkill`), ellers bruger chronod den gamle binær.
+Foreslå det ikke igen, medmindre brugeren selv tager det op.
