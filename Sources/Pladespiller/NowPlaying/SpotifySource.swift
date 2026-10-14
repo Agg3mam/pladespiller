@@ -102,11 +102,68 @@ final class SpotifySource: PlayerAppSource {
     }
 
     override func loadArtwork(for status: PlayerStatus) async -> ArtworkResult {
-        guard let url = status.artworkURL, !url.isEmpty else {
-            return status.trackID.isEmpty ? .none : .notYet
+        if let url = status.artworkURL, !url.isEmpty {
+            if let image = await covers.load(urlString: url) { return .image(image) }
         }
-        if let image = await covers.load(urlString: url) { return .image(image) }
+        // Spotifys AppleScript giver ikke altid en cover-url (fejl -1728 på nyere macOS og ved Spotify Connect).
+        // Så slår vi coveret op hos Spotify selv ud fra sangens id (brugeren har sagt ja: kun id'et sendes).
+        guard !status.trackID.isEmpty else { return .none }
+        if let url = await oEmbedCoverURL(trackID: status.trackID),
+           let image = await covers.load(urlString: url) { return .image(image) }
         return .none
+    }
+
+    // MARK: Cover via Spotifys oEmbed (uden AppleScript)
+
+    /// Opslag pr. sang-id → cover-url (husker også "ingen", så samme sang aldrig slås op to gange i en kørsel).
+    private var oEmbedCache: [String: String?] = [:]
+    private let oEmbedSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 10
+        config.timeoutIntervalForResource = 15
+        return URLSession(configuration: config)
+    }()
+
+    private func oEmbedCoverURL(trackID: String) async -> String? {
+        if let hit = oEmbedCache[trackID] { return hit }
+        guard let url = Self.oEmbedRequestURL(trackID: trackID) else { return nil }
+        let t0 = Date()
+        var result: String?
+        do {
+            let (data, response) = try await oEmbedSession.data(from: url)
+            if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                NowPlayingLog.log("[spotify] cover-opslag: HTTP \(http.statusCode)")
+            } else {
+                result = Self.parseOEmbedThumbnail(data).map(Self.largeCoverURL)
+            }
+        } catch {
+            NowPlayingLog.log("[spotify] cover-opslag fejlede: \(error.localizedDescription)")
+        }
+        NowPlayingLog.log("[spotify] cover-opslag \(Int(Date().timeIntervalSince(t0) * 1000)) ms: " + (result ?? "intet"))
+        oEmbedCache[trackID] = result
+        return result
+    }
+
+    /// `spotify:track:ID` (eller episode) → `https://open.spotify.com/oembed?url=https://open.spotify.com/track/ID`.
+    /// Lokale filer (`spotify:local:…`) har intet cover hos Spotify.
+    nonisolated static func oEmbedRequestURL(trackID: String) -> URL? {
+        let parts = trackID.split(separator: ":")
+        guard parts.count == 3, parts[0] == "spotify", ["track", "episode"].contains(String(parts[1])),
+              parts[2].allSatisfy({ $0.isLetter || $0.isNumber }) else { return nil }
+        var c = URLComponents(string: "https://open.spotify.com/oembed")
+        c?.queryItems = [URLQueryItem(name: "url", value: "https://open.spotify.com/\(parts[1])/\(parts[2])")]
+        return c?.url
+    }
+
+    nonisolated static func parseOEmbedThumbnail(_ data: Data) -> String? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let thumb = json["thumbnail_url"] as? String, thumb.hasPrefix("https://") else { return nil }
+        return thumb
+    }
+
+    /// oEmbed giver 300 px; samme billede findes i 640 px (Spotifys billed-id med en anden størrelseskode).
+    nonisolated static func largeCoverURL(_ thumb: String) -> String {
+        thumb.replacingOccurrences(of: "ab67616d00001e02", with: "ab67616d0000b273")
     }
 
     // MARK: Ren parsning (testes i --selftest)

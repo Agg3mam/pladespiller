@@ -13,6 +13,13 @@ final class MusicSource: PlayerAppSource {
     private let covers = ArtworkCache(capacity: 5)
     /// Persistent ID'er der ikke har et cover (så der ikke spørges igen, fx ved hver ny sang på en radiostation).
     private var withoutArtwork: [String] = []
+    /// Reserve, når Musik ikke selv har et cover (streamede sange): opslag hos Apple (brugerens ja).
+    private let itunes = ITunesCoverLookup()
+    private let remoteCovers = ArtworkCache(capacity: 5)
+    /// Første gang en sang meldte 0 covers. Streamede sange fra Apple Music får først deres cover lidt efter start,
+    /// så "intet cover" huskes først, når det stadig gælder efter `artworkGrace` sekunder.
+    private var noArtworkSince: [String: Date] = [:]
+    static let artworkGrace: TimeInterval = 20
 
     init() { super.init(bundleID: NowPlaying.BundleID.music, shortName: "musik", displayName: "Musik") }
 
@@ -146,7 +153,14 @@ final class MusicSource: PlayerAppSource {
         if let cached = covers.image(for: pid) { return .image(cached) }
         if withoutArtwork.contains(pid) { return .none }
         guard let count = status.artworkCount else { return .notYet }   // vent på status (antal covers)
-        guard count > 0 else { rememberNoArtwork(pid); return .none }
+        guard count > 0 else {
+            if let image = await coverFromITunes(status) { covers.insert(image, for: pid); return .image(image) }
+            let since = noArtworkSince[pid] ?? .now
+            noArtworkSince[pid] = since
+            if Date().timeIntervalSince(since) < Self.artworkGrace { return .notYet }   // prøv igen ved næste tjek
+            rememberNoArtwork(pid)
+            return .none
+        }
         let outcome: Timed<ScriptValue>
         if Self.useAppleScript {
             outcome = await AppleScriptRunner.shared.run(Self.artworkScriptSource)
@@ -163,6 +177,10 @@ final class MusicSource: PlayerAppSource {
             // Sangen skiftede imens; den nye status henter sit eget cover.
             return .none
         case .noArtwork:
+            if let image = await coverFromITunes(status) { covers.insert(image, for: pid); return .image(image) }
+            let since = noArtworkSince[pid] ?? .now
+            noArtworkSince[pid] = since
+            if Date().timeIntervalSince(since) < Self.artworkGrace { return .notYet }
             rememberNoArtwork(pid)
             return .none
         case .data(let data):
@@ -172,7 +190,13 @@ final class MusicSource: PlayerAppSource {
         }
     }
 
+    private func coverFromITunes(_ status: PlayerStatus) async -> NSImage? {
+        guard let url = await itunes.coverURL(title: status.title, artist: status.artist, album: status.album) else { return nil }
+        return await remoteCovers.load(urlString: url)
+    }
+
     private func rememberNoArtwork(_ pid: String) {
+        noArtworkSince[pid] = nil
         withoutArtwork.removeAll { $0 == pid }
         withoutArtwork.append(pid)
         if withoutArtwork.count > 20 { withoutArtwork.removeFirst() }
