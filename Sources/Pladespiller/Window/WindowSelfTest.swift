@@ -240,6 +240,13 @@ enum WindowSelfTest {
             a.take()   // idempotent
             a.release()
             check("IOPM-assertion tages og slippes", held && !a.isHeld)
+            // Træk i armen: armvinkel → fremdrift er det omvendte af fremdrift → armvinkel, og klemmes til rillerne.
+            for flat in [true, false] {
+                let g = TurntableGeometry(size: CGSize(width: 344, height: 344), cornerRadius: 28, deck: nil, flat: flat)
+                let worst = stride(from: 0.0, through: 1.0, by: 0.05).map { abs(g.progress(forArmAngle: g.armAngle(forProgress: $0)) - $0) }.max() ?? 1
+                check("arm → fremdrift (flad: \(flat)): største fejl \(String(format: "%.4f", worst))", worst < 0.005
+                      && g.progress(forArmAngle: g.restAngle) < 0.001 && g.progress(forArmAngle: g.restAngle + 3) > 0.999)
+            }
 
             let defaults = UserDefaults(suiteName: "pladespiller.selftest.fs") ?? .standard
             let settings = Settings(defaults: defaults)

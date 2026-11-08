@@ -38,8 +38,11 @@ struct TurntableView: View {
     var onArmClick: () -> Void = {}
     var onRecordClick: () -> Void = {}
     var onSpeedClick: (SpinSpeed) -> Void = { _ in }
+    /// Armen er trukket hen til fremdrift 0...1 og sluppet: spol dertil. nil = armen kan ikke trækkes.
+    var onArmSeek: ((Double) -> Void)? = nil
 
     @Environment(\.turntableSnapshot) private var snapshot
+    @Environment(\.widgetDragClaim) private var dragClaim
     @Environment(\.displayScale) private var displayScale
 
     var geometry: TurntableGeometry { TurntableGeometry(size: size, cornerRadius: cornerRadius, deck: deck, flat: theme == .flat) }
@@ -57,7 +60,8 @@ struct TurntableView: View {
                 }
             } else {
                 LiveTurntable(geometry: geometry, style: style, nowPlaying: nowPlaying, dim: dim, speed: speed, scrubbing: scrubbing,
-                              onArmClick: onArmClick, onRecordClick: onRecordClick, onSpeedClick: onSpeedClick)
+                              onArmClick: onArmClick, onRecordClick: onRecordClick, onSpeedClick: onSpeedClick,
+                              onArmSeek: (nowPlaying?.duration ?? 0) > 0 ? onArmSeek : nil, dragClaim: dragClaim)
             }
         }
         .frame(width: size.width, height: size.height)
@@ -83,6 +87,8 @@ private struct LiveTurntable: NSViewRepresentable {
     let onArmClick: () -> Void
     let onRecordClick: () -> Void
     let onSpeedClick: (SpinSpeed) -> Void
+    let onArmSeek: ((Double) -> Void)?
+    let dragClaim: WidgetDragClaim?
 
     func makeNSView(context: Context) -> TurntableNSView { TurntableNSView() }
 
@@ -90,6 +96,8 @@ private struct LiveTurntable: NSViewRepresentable {
         view.onArmClick = onArmClick
         view.onRecordClick = onRecordClick
         view.onSpeedClick = onSpeedClick
+        view.onArmSeek = onArmSeek
+        view.dragClaim = dragClaim
         view.configure(geometry: geometry, style: style)
         view.setSpeed(speed)
         view.setScrubbing(scrubbing)
@@ -143,6 +151,7 @@ final class TurntableNSView: NSView {
     override func mouseExited(with event: NSEvent) { NSCursor.arrow.set() }
 
     private func updateCursor(_ event: NSEvent) {
+        if armDrag?.active == true { NSCursor.closedHand.set(); return }
         let over = target(at: convert(event.locationInWindow, from: nil)) != nil
         (over ? NSCursor.pointingHand : NSCursor.arrow).set()
     }
@@ -152,6 +161,9 @@ final class TurntableNSView: NSView {
     var onArmClick: () -> Void = {}
     var onRecordClick: () -> Void = {}
     var onSpeedClick: (SpinSpeed) -> Void = { _ in }
+    var onArmSeek: ((Double) -> Void)?
+    /// Widgettens krav på musen: når armen trækkes, må panelet ikke flytte sig.
+    weak var dragClaim: WidgetDragClaim?
 
     // MARK: Klik
     //
@@ -191,14 +203,76 @@ final class TurntableNSView: NSView {
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    /// "Åbn som vindue" kan flyttes ved at trække i baggrunden – men ikke i armen eller pladen.
+    override var mouseDownCanMoveWindow: Bool { false }
 
     override func mouseDown(with event: NSEvent) {
-        pressed = target(at: convert(event.locationInWindow, from: nil))
+        let local = convert(event.locationInWindow, from: nil)
+        pressed = target(at: local)
+        armDrag = nil
+        if pressed == .arm, onArmSeek != nil, let g = geometry {
+            // Armen kan trækkes: hold fast i det sted på armen, man tog fat (vinklen mellem musen og armen).
+            let a = turntable.visibleArmAngle()
+            armDrag = ArmDrag(start: local, grab: Self.wrap(mouseAngle(local, g) - a), angle: a)
+            dragClaim?.isClaimed = true          // et træk i armen flytter ikke widgetten
+        }
+    }
+
+    // MARK: Træk i armen = spol
+    //
+    // Som på en rigtig pladespiller: armen løftes, følger musen hen over pladen og sænkes, hvor man slipper.
+    // Der spoles først ved slip (ikke undervejs), så musikken ikke hakker.
+
+    private struct ArmDrag {
+        var start: NSPoint
+        var grab: Double
+        var angle: Double
+        var active = false
+    }
+    private var armDrag: ArmDrag?
+    private static let armDragLift = 0.7
+
+    private func mouseAngle(_ local: NSPoint, _ g: TurntableGeometry) -> Double {
+        let p = CGPoint(x: local.x, y: bounds.height - local.y)          // y nedad som geometrien
+        return Double(atan2(p.y - g.pivot.y, p.x - g.pivot.x))
+    }
+
+    private static func wrap(_ a: Double) -> Double { atan2(sin(a), cos(a)) }
+
+    /// Armvinklen for musen, klemt til rillerne (yderste … inderste), og fremdriften der hører til.
+    private func armPosition(_ local: NSPoint, _ drag: ArmDrag, _ g: TurntableGeometry) -> (angle: Double, progress: Double) {
+        let raw = drag.angle + Self.wrap(mouseAngle(local, g) - drag.grab - drag.angle)
+        let f = g.progress(forArmAngle: CGFloat(raw))
+        return (Double(g.armAngle(forProgress: f)), f)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard var drag = armDrag, let g = geometry else { return }
+        let local = convert(event.locationInWindow, from: nil)
+        if !drag.active {
+            guard hypot(local.x - drag.start.x, local.y - drag.start.y) > 3 else { return }
+            drag.active = true
+            NSCursor.closedHand.set()
+        }
+        drag.angle = armPosition(local, drag, g).angle
+        armDrag = drag
+        turntable.setManualArm(angle: drag.angle, lift: Self.armDragLift)
     }
 
     override func mouseUp(with event: NSEvent) {
-        defer { pressed = nil }
+        defer { pressed = nil; armDrag = nil; dragClaim?.isClaimed = false }
         let local = convert(event.locationInWindow, from: nil)
+        if let drag = armDrag, drag.active, let g = geometry, animator != nil {
+            let (angle, f) = armPosition(local, drag, g)
+            let t = CACurrentMediaTime()
+            animator!.dropArm(from: angle, lift: Self.armDragLift, at: t)
+            armDropUntil = t + 1.5
+            animator!.scrubbing = true            // næste opdatering (den nye position) glider uden ekstra løft
+            resync(at: t)
+            onArmSeek?(f)
+            (target(at: local) != nil ? NSCursor.pointingHand : NSCursor.arrow).set()
+            return
+        }
         guard let pressed, bounds.contains(local), target(at: local) == pressed else { return }
         switch pressed {
         case .arm: onArmClick()
@@ -253,8 +327,10 @@ final class TurntableNSView: NSView {
     func setScrubbing(_ on: Bool) {
         guard let geometry else { return }
         if animator == nil { animator = TurntableAnimator(geometry: geometry) }
-        animator!.scrubbing = on
+        // Lige efter et slip af armen: spolingen skal også glide (ikke løfte armen igen).
+        animator!.scrubbing = on || CACurrentMediaTime() < armDropUntil
     }
+    private var armDropUntil: Double = 0
 
     func update(_ np: NowPlaying?) {
         guard let geometry else { return }
@@ -266,6 +342,12 @@ final class TurntableNSView: NSView {
 
     private func resync(at t: Double = CACurrentMediaTime()) {
         guard let animator else { return }
+        if let drag = armDrag, drag.active {
+            // Armen holdes af brugeren: alt andet kører videre, armen bliver under musen.
+            if visible { turntable.sync(animator, at: t) } else { turntable.applyFinal(animator, at: t) }
+            turntable.setManualArm(angle: drag.angle, lift: Self.armDragLift)
+            return
+        }
         if visible {
             turntable.sync(animator, at: t)
             if debugFreezeAfterSync { turntable.debugFreezeTransitions() }

@@ -128,6 +128,19 @@ struct TurntableGeometry: Hashable {
         return table[i] + (table[i + 1] - table[i]) * f
     }
 
+    /// Det omvendte: fremdrift 0...1 for en armvinkel (klemt til rilleområdet). Til at spole ved at trække armen.
+    func progress(forArmAngle a: CGFloat) -> Double {
+        let a0 = armAngle(forProgress: 0), a1 = armAngle(forProgress: 1)
+        guard abs(a1 - a0) > 1e-6 else { return 0 }
+        var lo = 0.0, hi = 1.0
+        let increasing = a1 > a0
+        for _ in 0..<40 {
+            let mid = (lo + hi) / 2
+            if (armAngle(forProgress: mid) < a) == increasing { lo = mid } else { hi = mid }
+        }
+        return (lo + hi) / 2
+    }
+
     private var progressTable: [CGFloat] {
         if let t = Self.tables[self] { return t }
         let t = (0...64).map { i -> CGFloat in

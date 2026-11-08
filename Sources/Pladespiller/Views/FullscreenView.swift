@@ -80,7 +80,8 @@ struct FullscreenView: View {
                       flatColor: settings.flatColor, flatCustomHex: settings.flatCustomHex, nowPlaying: np, dim: 0,
                       speed: settings.spinSpeed, scrubbing: false, deckDetails: true,
                       onArmClick: { store.playPause() }, onRecordClick: { store.openSourceApp() },
-                      onSpeedClick: { settings.spinSpeed = $0 })
+                      onSpeedClick: { settings.spinSpeed = $0 },
+                      onArmSeek: { f in if let d = store.current?.duration, d > 0 { store.seek(to: f * d) } })
     }
 
     // MARK: Placering af pladespilleren

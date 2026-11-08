@@ -297,6 +297,22 @@ final class TurntableLayer {
         }
     }
 
+    /// Brugeren trækker armen: den følger musen direkte (ingen animationer), løftet `lift`.
+    func setManualArm(angle: Double, lift: Double) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for l in [armRot, shadowRot] { l.removeAnimation(forKey: "arm") }
+        for l in [armImage, shadowImage, shadowMove] { l.removeAnimation(forKey: "lift") }
+        shadowImage.removeAnimation(forKey: "liftOpacity")
+        armRot.setValue(-angle, forKeyPath: "transform.rotation.z")
+        shadowRot.setValue(-angle, forKeyPath: "transform.rotation.z")
+        armImage.setValue(armScale(lift), forKeyPath: "transform.scale")
+        shadowImage.setValue(shadowScale(lift), forKeyPath: "transform.scale")
+        shadowImage.opacity = Float(shadowOpacity(lift))
+        shadowMove.position = shadowOffset(lift)
+        CATransaction.commit()
+    }
+
     /// Armens vinkel som den ses lige nu (præsentationslaget), til klik på armen.
     func visibleArmAngle() -> Double {
         let v = (armRot.presentation() ?? armRot).value(forKeyPath: "transform.rotation.z") as? Double ?? 0

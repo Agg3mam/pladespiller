@@ -56,7 +56,8 @@ struct WidgetView: View {
                       flatColor: settings.flatColor, flatCustomHex: settings.flatCustomHex, nowPlaying: np, dim: dim,
                       speed: settings.spinSpeed, scrubbing: ScrubState.shared.fraction != nil,
                       onArmClick: { store.playPause() }, onRecordClick: { store.openSourceApp() },
-                      onSpeedClick: { settings.spinSpeed = $0 })
+                      onSpeedClick: { settings.spinSpeed = $0 },
+                      onArmSeek: { f in if let d = store.current?.duration, d > 0 { store.seek(to: f * d) } })
             .probe("krop")
     }
 

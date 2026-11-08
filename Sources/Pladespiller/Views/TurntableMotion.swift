@@ -258,6 +258,13 @@ struct TurntableAnimator {
         return true
     }
 
+    /// Brugeren slipper armen ved `angle` (løftet `lift`): den sænkes blødt derfra og glider til sin plads
+    /// (rillen ved den nye position, eller hvilestøtten ved pause).
+    mutating func dropArm(from angle: Double, lift: Double, at t: Double) {
+        armTransition = (t, Self.dropDuration, angle, lift, 0, true)
+    }
+    static let dropDuration = 0.35
+
     /// Tidspunktet hvor alle korte overgange er færdige.
     func transitionsEnd(after t: Double) -> Double {
         var end = max(spin.rampEnd, labelFade.end, led.end, idle.end)
