@@ -174,7 +174,7 @@ final class MarqueeNSView: NSView {
             anim.duration = cycle
             anim.repeatCount = .infinity
             anim.calculationMode = .linear
-            anim.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
+            anim.preferredFrameRateRange = TurntableLayer.smoothRange
             anim.beginTime = 0   // "nu" ved commit (QA N2: ingen absolutte tider)
             stripLayer.add(anim, forKey: "marquee")
         }

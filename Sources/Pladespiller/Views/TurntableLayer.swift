@@ -332,7 +332,7 @@ final class TurntableLayer {
         let rampEnd = max(t, spin.rampEnd)
         var parts: [CAAnimation] = []
         if rampEnd > t {
-            let times = Self.samples(from: t, to: rampEnd, step: 1.0 / 60)
+            let times = Self.samples(from: t, to: rampEnd, step: 1.0 / 120)
             let ramp = CAKeyframeAnimation(keyPath: "transform.rotation.z")
             ramp.values = times.map { -spin.angle(at: $0) }
             ramp.keyTimes = times.map { NSNumber(value: ($0 - t) / (rampEnd - t)) }
@@ -366,7 +366,7 @@ final class TurntableLayer {
         // Resten: tætte samples gennem overgangene, derefter glisne samples af armens langsomme vej ind over pladen.
         let tEnd = animator.transitionsEnd(after: t)
         let armEnd = animator.armMotionEnd(after: t)
-        let dense = Self.samples(from: t, to: tEnd, step: 1.0 / 60)
+        let dense = Self.samples(from: t, to: tEnd, step: 1.0 / 120)
         let sparseStep = max(1.0, (armEnd - tEnd) / 600)
         let sparse = armEnd > tEnd + 0.01 ? Array(Self.samples(from: tEnd, to: armEnd, step: sparseStep).dropFirst()) : []
         let densePoses = dense.map(animator.pose(at:))
@@ -399,7 +399,9 @@ final class TurntableLayer {
 
     /// Tilføjer en keyframe-animation hvis værdierne faktisk ændrer sig.
     /// QA M11: 30–60 Hz, helst 60, så rotationen er jævn men systemet må sænke raten.
-    static let smoothRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
+    /// Følg skærmens egen billedrate (op til 120 Hz). Før var loftet 60: på en 100/120 Hz-skærm blev pladen så
+    /// opdateret i en ujævn takt (fx 60 billeder fordelt på 100 opdateringer), og det ses som hak i den langsomme rotation.
+    static let smoothRange = CAFrameRateRange(minimum: 30, maximum: 120, preferred: 120)
 
     /// Tilføjer en keyframe-animation hvis værdierne faktisk ændrer sig.
     @discardableResult
