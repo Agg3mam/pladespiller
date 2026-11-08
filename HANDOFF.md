@@ -67,6 +67,7 @@ open ~/Applications/Pladespiller.app --args --log   # rigtig musik + log
   - Armen følger sangen, løftes ved pause og flytter sig ved ny sang på under 1 s.
   - Lysrefleksen står stille, mens pladen drejer.
 - **Klik:** armen = afspil/pause, pladen = åbn musikappen, og i fremdriftslinjen kan man klikke og trække for at spole.
+- **Træk i armen = spol** (2026-11-08): armen løftes og følger musen (`TurntableNSView.mouseDragged`, `TurntableLayer.setManualArm`), og ved slip sænkes den (`TurntableAnimator.dropArm`), og der spoles til `TurntableGeometry.progress(forArmAngle:)`. Der spoles først ved slip. Et træk på armen flytter ikke widgetten (`widgetDragClaim`).
 - **Musikdata:**
   - Spotify og Musik læses med rå Apple Events, der sendes til appens **pid**, så Spotify eller Musik aldrig bliver startet.
   - Opdateringer kommer med det samme via `DistributedNotificationCenter` (`.deliverImmediately`), og der tjekkes kun hvert 5. sekund, mens der spilles.
