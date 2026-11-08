@@ -297,36 +297,43 @@ final class TurntableLayer {
         }
     }
 
-    /// Brugeren holder armen: den står stille ved `angle` (ingen animationer på vinklen) og løftes blødt fra
-    /// `liftFrom` til `liftTo` over `duration` sekunder (0 = med det samme).
-    func holdArm(angle: Double, liftFrom: Double, liftTo: Double, duration: Double) {
+    /// Brugeren holder armen: den står stille ved `angle` (ingen animationer på vinklen). Løftet følger `lift`
+    /// (tid fra nu → løft) de næste `duration` sekunder og ender på `lift(duration)`.
+    /// Kurven samples, så den er præcis den samme, som hvis den aldrig var blevet afbrudt.
+    func holdArm(angle: Double, duration: Double, lift: (Double) -> Double) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        for l in [armRot, shadowRot] { l.removeAnimation(forKey: "arm") }
         for l in [armImage, shadowImage, shadowMove] { l.removeAnimation(forKey: "lift") }
         shadowImage.removeAnimation(forKey: "liftOpacity")
-        armRot.setValue(-angle, forKeyPath: "transform.rotation.z")
-        shadowRot.setValue(-angle, forKeyPath: "transform.rotation.z")
-        armImage.setValue(armScale(liftTo), forKeyPath: "transform.scale")
-        shadowImage.setValue(shadowScale(liftTo), forKeyPath: "transform.scale")
-        shadowImage.opacity = Float(shadowOpacity(liftTo))
-        shadowMove.position = shadowOffset(liftTo)
-        if duration > 0.005, abs(liftTo - liftFrom) > 1e-3 {
-            func add(_ l: CALayer, _ path: String, _ from: Any, _ to: Any, _ key: String) {
-                let a = CABasicAnimation(keyPath: path)
-                a.fromValue = from
-                a.toValue = to
-                a.duration = duration
-                a.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                a.preferredFrameRateRange = Self.smoothRange
-                l.add(a, forKey: key)
-            }
-            add(armImage, "transform.scale", armScale(liftFrom), armScale(liftTo), "lift")
-            add(shadowImage, "transform.scale", shadowScale(liftFrom), shadowScale(liftTo), "lift")
-            add(shadowImage, "opacity", shadowOpacity(liftFrom), shadowOpacity(liftTo), "liftOpacity")
-            add(shadowMove, "position", NSValue(point: shadowOffset(liftFrom)), NSValue(point: shadowOffset(liftTo)), "lift")
+        setHeldArmAngle(angle)
+        let end = lift(max(0, duration))
+        armImage.setValue(armScale(end), forKeyPath: "transform.scale")
+        shadowImage.setValue(shadowScale(end), forKeyPath: "transform.scale")
+        shadowImage.opacity = Float(shadowOpacity(end))
+        shadowMove.position = shadowOffset(end)
+        if duration > 0.005 {
+            let times = Self.samples(from: 0, to: duration, step: 1.0 / 120)
+            let lifts = times.map(lift)
+            keyframes(armImage, "transform.scale", times, lifts.map(armScale), key: "lift")
+            keyframes(shadowImage, "transform.scale", times, lifts.map(shadowScale), key: "lift")
+            keyframes(shadowImage, "opacity", times, lifts.map(shadowOpacity), key: "liftOpacity")
+            keyframes(shadowMove, "position", times, lifts.map { NSValue(point: shadowOffset($0)) }, key: "lift")
         }
         CATransaction.commit()
+    }
+
+    /// Kun vinklen (mens armen trækkes): løftets igangværende animation får lov at køre færdig uforstyrret.
+    func moveHeldArm(angle: Double) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        setHeldArmAngle(angle)
+        CATransaction.commit()
+    }
+
+    private func setHeldArmAngle(_ angle: Double) {
+        for l in [armRot, shadowRot] { l.removeAnimation(forKey: "arm") }
+        armRot.setValue(-angle, forKeyPath: "transform.rotation.z")
+        shadowRot.setValue(-angle, forKeyPath: "transform.rotation.z")
     }
 
     /// Armens løft som det ses lige nu (0 = nede).

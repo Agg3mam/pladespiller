@@ -241,17 +241,18 @@ final class TurntableNSView: NSView {
     private static let holdLift = 0.7
     private static let liftDuration = 0.2
 
-    /// Løftet lige nu under et greb (blød ease-out fra `liftFrom` til `holdLift`), og hvor længe det har tilbage.
-    private func holdLift(_ h: ArmHold, at t: Double) -> (value: Double, remaining: Double) {
+    /// Løftet under et greb til tiden t: blød ease-out fra `liftFrom` til `holdLift` over `liftDuration`.
+    private func holdLift(_ h: ArmHold, at t: Double) -> Double {
         let s = min(1, max(0, (t - h.liftStart) / Self.liftDuration))
         let e = 1 - (1 - s) * (1 - s)
-        return (h.liftFrom + (Self.holdLift - h.liftFrom) * e, Self.liftDuration * (1 - s))
+        return h.liftFrom + (Self.holdLift - h.liftFrom) * e
     }
 
+    /// Læg grebet (vinkel + resten af løftet) ind igen, fx efter at alle animationer er lagt om.
     private func applyHold(at t: Double = CACurrentMediaTime()) {
         guard let h = armHold else { return }
-        let lift = holdLift(h, at: t)
-        turntable.holdArm(angle: h.angle, liftFrom: lift.value, liftTo: Self.holdLift, duration: lift.remaining)
+        let remaining = max(0, h.liftStart + Self.liftDuration - t)
+        turntable.holdArm(angle: h.angle, duration: remaining) { [h] dt in self.holdLift(h, at: t + dt) }
     }
 
     private func mouseAngle(_ local: NSPoint, _ g: TurntableGeometry) -> Double {
@@ -277,7 +278,7 @@ final class TurntableNSView: NSView {
         }
         h.angle = armPosition(local, h, g).angle
         armHold = h
-        applyHold()
+        turntable.moveHeldArm(angle: h.angle)        // kun vinklen: løftet kører videre uden at starte forfra
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -296,7 +297,7 @@ final class TurntableNSView: NSView {
                 animator!.update(input, at: t)
             }
             // Armen sænkes blødt fra der, hvor den holdes (til rillen, eller til støtten ved pause).
-            animator!.dropArm(from: h.angle, lift: holdLift(h, at: t).value, at: t)
+            animator!.dropArm(from: h.angle, lift: holdLift(h, at: t), at: t)
             armDropUntil = t + 1.5                 // musikappens svar bagefter glider også uden ekstra løft
             armHold = nil
             resync(at: t)
