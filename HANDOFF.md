@@ -35,6 +35,7 @@ open ~/Applications/Pladespiller.app --args --log   # rigtig musik + log
 | `--mock` | testdata i en løkke på 34 s (afspil, pause, ny sang, uden cover, intet spiller) |
 | `--log` | den installerede app logger til `~/Library/Logs/Pladespiller/nowplaying.log` |
 | `--render-snapshots <mappe>` | tegner alle visninger til PNG uden vindue; kør også layout-, spin- og live-tjek |
+| `--arm-test [mappe]` | grib/træk i armen: 17 scenarier × 4 svartider fra en simuleret musikapp, målt pr. billede ved 60 og 120 Hz i præsentationslaget (vinkel, løft, skygge, pladens rotation); ca. 40 s, "ARM-TEST: ALT OK". Køres også af `--render-snapshots` (`arm-tjek.txt`; spring over med `PLADESPILLER_SKIP_ARM=1`) |
 | `--window-selftest` | 71 tjek af gitter, menu, fuld skærm osv. ("alt OK" — men menu-tjekkene fejler, når appens sprog er engelsk; de forventer danske menupunkter) |
 | `--nowplaying-log --selftest` | 95 tjek af kilder, LRC-parser, LRCLIB-backoff og cache |
 | `--nowplaying-log [--cmd playpause\|next\|previous\|seek:<s>] [--app spotify\|music]` | live-log og kommandoer fra Terminal (så får Terminal tilladelsen, ikke appen) |
@@ -67,7 +68,7 @@ open ~/Applications/Pladespiller.app --args --log   # rigtig musik + log
   - Armen følger sangen, løftes ved pause og flytter sig ved ny sang på under 1 s.
   - Lysrefleksen står stille, mens pladen drejer.
 - **Klik:** armen = afspil/pause, pladen = åbn musikappen, og i fremdriftslinjen kan man klikke og trække for at spole.
-- **Grib/træk i armen = spol** (2026-11-08): et tryk løfter armen blødt (0,2 s) og pauser musikken med det samme. Armen holdes og følger musen (`ArmHold`, `TurntableLayer.holdArm`), og ved slip sænkes den (`TurntableAnimator.dropArm`), og der spoles til `TurntableGeometry.progress(forArmAngle:)`, hvorefter musikken fortsætter, hvis den spillede. Ved slip får animatoren den nye tilstand med det samme, så armen ikke hopper. Der spoles først ved slip. Et træk på armen flytter ikke widgetten (`widgetDragClaim`).
+- **Grib/træk i armen = spol** (2026-11-08): et tryk løfter armen blødt (0,2 s) og pauser musikken med det samme (også i animationen, så pladen bremser op med det samme). Armen holdes og følger musen fra første punkt (`ArmHold`, `TurntableLayer.holdArm`/`moveHeldArm`); 3 pt-grænsen afgør kun klik eller træk. Den klemmes til rillerne – eller til der, hvor den blev grebet (fx støtten). Ved slip får animatoren straks den nye tilstand (position og afspil/pause), armen sænkes (`TurntableAnimator.dropArm`), og der spoles til `TurntableGeometry.progress(forArmAngle:)`; musikken fortsætter, hvis den spillede. Musikappens svar, der modsiger det, brugeren lige har gjort (forsinket "pause", gammel position), holdes tilbage i op til 1 s (`Intent` i `TurntableNSView`). Små rettelser midt i en bevægelse tones ud oven i den (`armCorrections`) i stedet for at starte den forfra, og pladens animation lægges kun om, når omdrejningen ændrer sig. Testes med `--arm-test`. Et træk på armen flytter ikke widgetten (`widgetDragClaim`).
 - **Musikdata:**
   - Spotify og Musik læses med rå Apple Events, der sendes til appens **pid**, så Spotify eller Musik aldrig bliver startet.
   - Opdateringer kommer med det samme via `DistributedNotificationCenter` (`.deliverImmediately`), og der tjekkes kun hvert 5. sekund, mens der spilles.
