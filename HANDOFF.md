@@ -174,6 +174,14 @@ Faldgruber, vi har mødt:
 4. **Menuen:** Farve ▸ og "Vælg farve…", der skal give fokus tilbage, når panelet lukkes. "Fjern widget".
 5. Spoling i **Musik** (Spotify er bekræftet live).
 
+**Fejlrettelser 2026-11-08** (efter "nederen bugs ved fullscreen"; ikke udgivet endnu):
+- Sangteksten på fuld skærm og i vinduet kunne gå ned. Det skete, når listen blev animeret forbi enden af en kortere tekst, så `ForEach`-intervallet blev tomt. Nu klemmes positionen, listen får `.id(trackKey)`, og urets linje tjekkes mod tekstens længde.
+- Fuld skærm lukkede, når skærmen gik i dvale (skærmen forsvandt fra `NSScreen.screens`). Nu huskes skærmen (`pladespiller.fullscreen.resumeScreen`). Fuld skærm åbner igen, når skærmen kommer tilbage, og også efter genstart. Kun Esc eller menuen glemmer den.
+- Striben over menulinjen havde `.fullScreenAuxiliary` og kom derfor ind over andre apps i fuld skærm. Det er fjernet.
+- "Flyt nye vinduer væk" fangede ikke det første vindue i en app, der lige er startet. Nu tjekkes appens vinduer 0,3, 1 og 2,5 s efter start. Skærme sammenlignes nu efter id.
+- "Åbn som vindue" åbner igen efter genstart (`pladespiller.playerWindow.open`, uden at tage fokus). Rammen gemmes selv (`pladespiller.playerWindow.frame`), for `setFrameUsingName` lagde vinduet på hovedskærmen.
+- Esc på fuld skærm virker stadig kun, når man har klikket på den først. Fuld skærm åbner bevidst uden at tage fokus.
+
 **Ikke QA-kontrolleret siden bølge 2:** polering, Stor "Helt træ", spoling, Flad, sangtekst, fuld skærm og flytning af vinduer. Kør en QA-runde (visuelt, ydelse med fuld skærm og WindowServer, og kodegennemgang), før v0.4 udgives.
 
 **Kendte småting og åbne valg:**
