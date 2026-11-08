@@ -127,6 +127,7 @@ struct FullscreenView: View {
                     // Sangteksten holder sig i sit eget felt og fader blødt ud foroven og forneden, så de kommende
                     // linjer aldrig løber ned i titel og kunstner nederst (altid mindst ca. 12 % af højden luft).
                     FullscreenLyrics(np: np, lyrics: l, unit: u, width: width, colors: colors)
+                        .id(np.trackKey)        // ny sang = ny liste: ingen glidning fra den gamle sangs linje
                         .frame(width: width, height: size.height * 0.74, alignment: .leading)
                         .mask {
                             LinearGradient(stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.12),
@@ -237,7 +238,7 @@ struct FullscreenLyrics: View {
     private var clock: LyricsClock { LyricsClock.shared }
 
     private var index: (line: Int?, word: Int?) {
-        if snapshot != nil || clock.trackKey != np.trackKey {
+        if snapshot != nil || clock.trackKey != np.trackKey || (clock.lineIndex ?? -1) >= lyrics.lines.count {
             return LyricsClock.index(lyrics, at: np.position(at: snapshot != nil ? np.positionTimestamp : .now))
         }
         return (clock.lineIndex, clock.wordIndex)
@@ -303,9 +304,11 @@ private struct LyricsStack: View, Animatable {
     }
 
     var body: some View {
-        let base = Int(position.rounded(.down))
+        // Positionen kan midt i en animation ligge uden for listen (fx kortere tekst): klem den, ellers er
+        // intervallet tomt (nedre > øvre), og så går appen ned.
+        let base = min(max(-1, Int(position.rounded(.down))), lyrics.lines.count - 1)
         ZStack(alignment: .leading) {
-            ForEach(max(-1, base - 3)...min(lyrics.lines.count - 1, base + 5), id: \.self) { i in
+            ForEach(max(-1, base - 3)...max(-1, min(lyrics.lines.count - 1, base + 5)), id: \.self) { i in
                 let d = Double(i) - position
                 line(i)
                     .frame(width: width, alignment: .leading)

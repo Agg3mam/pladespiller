@@ -28,6 +28,14 @@ final class FullscreenController {
     let windowMover = NewWindowMover()
     /// Programmet der havde fokus, før et klik på fuld skærm aktiverede os.
     private var previousApp: NSRunningApplication?
+    /// Skærmen fuld skærm skal tilbage på, når den dukker op igen: den forsvandt (skærmen gik i dvale, blev slukket
+    /// eller taget ud), eller fuld skærm var åben, da appen sidst lukkede. nil = brugeren har selv lukket den.
+    /// Gemmes, så fuld skærm også kommer igen efter genstart/login.
+    private var resumeScreenID: String? {
+        get { UserDefaults.standard.string(forKey: Self.resumeKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.resumeKey) }
+    }
+    static let resumeKey = "pladespiller.fullscreen.resumeScreen"
 
     /// Om der spilles lige nu. Sættes udefra (se `observePlaying`).
     var isPlaying = false { didSet { if isPlaying != oldValue { updateAssertion() } } }
@@ -79,13 +87,27 @@ final class FullscreenController {
     func toggle() { isShowing ? hide() : show() }
 
     func show() {
-        guard window == nil, let screen = targetScreen() else { return }
+        guard let screen = targetScreen() else { return }
+        show(on: screen)
+    }
+
+    /// Ved opstart: åbn igen, hvis fuld skærm var åben sidst – men kun på den samme skærm. Er den der ikke
+    /// (endnu), venter vi på den i `screensChanged` i stedet for at lægge fuld skærm over arbejdsskærmen.
+    func restoreIfNeeded() {
+        guard window == nil, let id = resumeScreenID,
+              let screen = NSScreen.screens.first(where: { $0.stableID == id }) else { return }
+        show(on: screen)
+    }
+
+    private func show(on screen: NSScreen) {
+        guard window == nil else { return }
         let w = FullscreenWindow(screen: screen)
         w.contentView = FullscreenHostingView(rootView: makeContent())
         w.onEscape = { [weak self] in self?.hide() }
         w.onClick = { [weak self] in self?.clicked() }
         window = w
         screenID = screen.stableID
+        resumeScreenID = screen.stableID
         // Åbn uden at aktivere: fokus bliver hos det brugeren arbejder i på hovedskærmen.
         w.orderFrontRegardless()
         updateCover(screen)
@@ -94,7 +116,13 @@ final class FullscreenController {
         onShowingChanged(true)
     }
 
+    /// Brugeren lukker fuld skærm (menu, Esc): den kommer ikke igen af sig selv.
     func hide() {
+        resumeScreenID = nil
+        close()
+    }
+
+    private func close() {
         guard let w = window else { return }
         window = nil
         screenID = nil
@@ -133,9 +161,14 @@ final class FullscreenController {
     }
 
     private func screensChanged() {
-        guard let w = window else { return }
+        guard let w = window else {
+            restoreIfNeeded()   // skærmen er tilbage (vågnet, tændt, sat i igen): åbn på den igen
+            return
+        }
         guard let screen = NSScreen.screens.first(where: { $0.stableID == screenID }) else {
-            hide()      // skærmen er taget ud: luk pænt; åbn ikke af sig selv igen
+            // Skærmen er væk – ofte bare fordi den gik i dvale. Luk pænt, men husk den, så fuld skærm
+            // kommer igen, når skærmen gør. (Før forsvandt fuld skærm hver gang skærmen faldt i søvn.)
+            close()
             return
         }
         if w.frame != screen.frame { w.setFrame(screen.frame, display: true) }   // ny opløsning
@@ -174,6 +207,7 @@ final class FullscreenController {
         // Ny skærm valgt mens fuld skærm vises: flyt derhen.
         if let w = window, let screen = targetScreen(), screen.stableID != screenID {
             screenID = screen.stableID
+            resumeScreenID = screen.stableID
             w.setFrame(screen.frame, display: true)
             updateCover(screen)
         }
@@ -319,7 +353,9 @@ final class MenuBarCover: NSPanel {
         host = NSHostingView(rootView: content)
         super.init(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         level = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue + 1)
-        collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
+        // Ikke `.fullScreenAuxiliary`: så kom striben med ind over apps i fuld skærm på den skærm (fx en video)
+        // og dækkede toppen af dem.
+        collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
         isOpaque = true
         backgroundColor = .black
         hasShadow = false

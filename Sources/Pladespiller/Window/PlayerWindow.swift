@@ -20,7 +20,18 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
 
     func toggle() { isShowing ? close() : show() }
 
-    func show() {
+    /// Var vinduet åbent, da appen sidst lukkede (genstart, opdatering, login)? Så åbnes det igen.
+    static let openKey = "pladespiller.playerWindow.open"
+
+    /// Ved opstart: åbn igen, hvis vinduet var åbent sidst – uden at tage fokus fra det, man arbejder i.
+    func restoreIfNeeded() {
+        guard UserDefaults.standard.bool(forKey: Self.openKey) else { return }
+        show(activate: false)
+    }
+
+    func show() { show(activate: true) }
+
+    private func show(activate: Bool) {
         if let window {
             NSApp.activate()
             window.makeKeyAndOrderFront(nil)
@@ -40,16 +51,23 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
         if !w.setFrameUsingName("PladespillerVindue") { w.center() }
         w.setFrameAutosaveName("PladespillerVindue")
         window = w
+        UserDefaults.standard.set(true, forKey: Self.openKey)
         NSApp.setActivationPolicy(.regular)
         installMainMenu()
-        NSApp.activate()
-        w.makeKeyAndOrderFront(nil)
+        if activate {
+            NSApp.activate()
+            w.makeKeyAndOrderFront(nil)
+        } else {
+            w.orderFront(nil)
+        }
         onShowingChanged(true)
     }
 
     func close() { window?.performClose(nil) }
 
     func windowWillClose(_ notification: Notification) {
+        // Brugeren lukkede vinduet (ikke appen, der afsluttes: så kaldes dette ikke).
+        UserDefaults.standard.set(false, forKey: Self.openKey)
         window?.delegate = nil
         window = nil
         // Tilbage til baggrundsapp (ingen Dock-ikon); widgetten kører videre.

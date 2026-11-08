@@ -103,9 +103,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = StatusItemController(settings: settings, fullscreen: fullscreen, playerWindow: playerWindow)
         desktopSnow = DesktopSnowController(settings: settings)
         // `--fullscreen`: åbn fuld skærm ved start (til gennemsyn og test uden at klikke i menuen).
-        if CommandLine.arguments.contains("--fullscreen") { fullscreen.show() }
+        if CommandLine.arguments.contains("--fullscreen") { fullscreen.show() } else { fullscreen.restoreIfNeeded() }
         // `--window`: åbn pladespilleren som vindue ved start (til gennemsyn og test).
-        if CommandLine.arguments.contains("--window") { playerWindow.show() }
+        if CommandLine.arguments.contains("--window") { playerWindow.show() } else { playerWindow.restoreIfNeeded() }
     }
 
     /// Hold storens sangtekst-hentning i takt med menuvalget "Vis sangtekst".

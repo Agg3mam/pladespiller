@@ -39,12 +39,16 @@ final class NewWindowMover {
         guard !isRunning else { return }
         isRunning = true
         let ws = NSWorkspace.shared.notificationCenter
-        for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didActivateApplicationNotification] {
-            workspaceObservers.append(ws.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
-                let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
-                MainActor.assumeIsolated { if let app { self?.observe(app) } }
-            })
-        }
+        workspaceObservers.append(ws.addObserver(forName: NSWorkspace.didActivateApplicationNotification,
+                                                 object: nil, queue: .main) { [weak self] note in
+            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            MainActor.assumeIsolated { if let app { self?.observe(app) } }
+        })
+        workspaceObservers.append(ws.addObserver(forName: NSWorkspace.didLaunchApplicationNotification,
+                                                 object: nil, queue: .main) { [weak self] note in
+            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            MainActor.assumeIsolated { if let app { self?.appLaunched(app) } }
+        })
         workspaceObservers.append(ws.addObserver(forName: NSWorkspace.didTerminateApplicationNotification,
                                                  object: nil, queue: .main) { [weak self] note in
             let pid = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.processIdentifier
@@ -131,6 +135,30 @@ final class NewWindowMover {
         CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(obs), .defaultMode)
     }
 
+    /// En app er lige startet. Dens første vindue er tit allerede åbnet, før vi kan nå at lytte (så kom
+    /// netop det vindue, man åbnede appen for, aldrig væk). Derfor ser vi også på appens vinduer lige efter
+    /// starten – de er nye, så det holder sig til "kun nye vinduer".
+    private func appLaunched(_ app: NSRunningApplication) {
+        observe(app)
+        let pid = app.processIdentifier
+        for delay in [0.3, 1.0, 2.5] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, self.isRunning else { return }
+                    if self.observers[pid] == nil, !app.isTerminated { self.observe(app) }   // var ikke klar før
+                    for w in Self.windows(of: pid) { self.moveIfNeeded(w, attempt: 1) }
+                }
+            }
+        }
+    }
+
+    private static func windows(of pid: pid_t) -> [AXUIElement] {
+        var v: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(AXUIElementCreateApplication(pid), kAXWindowsAttribute as CFString, &v) == .success
+        else { return [] }
+        return (v as? [AXUIElement]) ?? []
+    }
+
     // MARK: Flyt
 
     fileprivate func windowCreated(_ window: AXUIElement) {
@@ -163,7 +191,7 @@ final class NewWindowMover {
 
     /// Hvor brugeren arbejder: hovedskærmen (menulinjen), medmindre det er fuld skærm-skærmen.
     static func destinationScreen(screens: [NSScreen], excluding fs: NSScreen) -> NSScreen? {
-        screens.first { $0 != fs }
+        screens.first { $0.stableID != fs.stableID }   // efter id: NSScreen-objekter kan være nye kopier
     }
 
     // MARK: Rene funktioner (CG-koordinater, origin øverst til venstre – det AX bruger)

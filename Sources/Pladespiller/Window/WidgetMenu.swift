@@ -289,6 +289,8 @@ enum RemoveWidget {
             return
         }
         LoginItem.disable()
+        UserDefaults.standard.removeObject(forKey: FullscreenController.resumeKey)   // fuld skærm åbner ikke igen
+        UserDefaults.standard.removeObject(forKey: PlayerWindowController.openKey)
         NSApp.terminate(nil)
     }
 }

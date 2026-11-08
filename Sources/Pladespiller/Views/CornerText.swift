@@ -158,7 +158,9 @@ struct LyricsView: View {
 
     /// Linje/ord nu: live fra uret, i snapshots udregnet direkte af positionen.
     private var index: (line: Int?, word: Int?) {
-        if snapshot != nil || clock.trackKey != np.trackKey {
+        // Uret kan stå på en linje fra en anden udgave af teksten (samme sang): så udregnes den her, så
+        // `lines[li]` aldrig peger uden for listen.
+        if snapshot != nil || clock.trackKey != np.trackKey || (clock.lineIndex ?? -1) >= lyrics.lines.count {
             return LyricsClock.index(lyrics, at: np.position(at: snapshot != nil ? np.positionTimestamp : .now))
         }
         return (clock.lineIndex, clock.wordIndex)
