@@ -65,6 +65,15 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
 
     func close() { window?.performClose(nil) }
 
+    // Gem placeringen med det samme ved hver flytning/ændring: appen lukkes tit uden at vinduet lukkes
+    // (opdatering, nedlukning), og så nåede den automatiske gemning ikke altid med (vinduet åbnede på en anden skærm).
+    func windowDidMove(_ notification: Notification) { saveFrame() }
+    func windowDidEndLiveResize(_ notification: Notification) { saveFrame() }
+    func windowDidChangeScreen(_ notification: Notification) { saveFrame() }
+    func windowDidResize(_ notification: Notification) { if window?.inLiveResize == false { saveFrame() } }
+
+    private func saveFrame() { window?.saveFrame(usingName: "PladespillerVindue") }
+
     func windowWillClose(_ notification: Notification) {
         // Brugeren lukkede vinduet (ikke appen, der afsluttes: så kaldes dette ikke).
         UserDefaults.standard.set(false, forKey: Self.openKey)
