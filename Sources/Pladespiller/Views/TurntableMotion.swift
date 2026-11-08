@@ -131,6 +131,9 @@ struct TurntableAnimator {
     private enum ArmTarget: Equatable { case rest, groove }
     private var armTarget: ArmTarget = .rest
     private var armTransition: (start: Double, duration: Double, fromAngle: Double, fromLift: Double, lift: Double, glide: Bool)?
+    /// Små rettelser af målet (fx musikappens bekræftelse midt i en bevægelse): i stedet for at starte bevægelsen forfra
+    /// (så armen bremser brat op og starter igen) lægges forskellen oven i og tones blødt ud. Vinkel og fart er kontinuerte.
+    private var armCorrections: [(start: Double, amount: Double)] = []
 
     // Etiket
     private(set) var label: LabelContent = .blank
@@ -168,7 +171,7 @@ struct TurntableAnimator {
     func with(geometry g: TurntableGeometry) -> TurntableAnimator {
         var copy = TurntableAnimator(geometry: g)
         copy.spin = spin; copy.input = input; copy.inputTime = inputTime
-        copy.armTarget = armTarget; copy.armTransition = armTransition
+        copy.armTarget = armTarget; copy.armTransition = armTransition; copy.armCorrections = armCorrections
         copy.label = label; copy.previousLabel = previousLabel; copy.labelFade = labelFade
         copy.led = led; copy.idle = idle; copy.started = started
         copy.cruiseVelocity = cruiseVelocity; copy.fortyFive = fortyFive
@@ -216,6 +219,8 @@ struct TurntableAnimator {
         let glide = jump > 0 && !seek
         let newArmTarget: ArmTarget = (new?.isPlaying == true) ? .groove : .rest
         let currentPose = pose(at: t)
+        let oldTargetAngle = armTargetAngle(at: t)
+        armCorrections.removeAll { t >= $0.start + Self.glideDuration }
 
         input = new
         inputTime = t
@@ -245,14 +250,23 @@ struct TurntableAnimator {
         }
 
         let armNeedsMove = newArmTarget != armTarget || (trackChanged && newArmTarget == .groove) || seek
-        if glide, !armNeedsMove {
-            // Glid fra den nuværende vinkel til den nye uden løft (løft fortsætter hvis en overgang var i gang).
+        if glide, !armNeedsMove, let tr = armTransition, t < tr.start + tr.duration {
+            // Midt i en bevægelse: den fortsætter uforstyrret mod det nye mål; forskellen tones ud ovenpå.
+            let w = targetWeight(tr, at: t)
+            armTarget = newArmTarget
+            let amount = (oldTargetAngle - armTargetAngle(at: t)) * w
+            if abs(amount) > 1e-9 { armCorrections.append((t, amount)) }
+            return true
+        } else if glide, !armNeedsMove {
+            // Glid fra den nuværende vinkel til den nye uden løft.
             armTransition = (t, Self.glideDuration, currentPose.armAngle, currentPose.armLift, 0, true)
+            armCorrections = []
         } else if armNeedsMove {
             // Løft lidt ved pause/afspil, lidt mere ved ny sang.
             let lift: Double = trackChanged || seek ? 1.0 : 0.8
             let dur = seek ? D * 0.7 : D
             armTransition = (t, dur, currentPose.armAngle, currentPose.armLift, lift, false)
+            armCorrections = []
         }
         armTarget = newArmTarget
         return true
@@ -262,6 +276,7 @@ struct TurntableAnimator {
     /// (rillen ved den nye position, eller hvilestøtten ved pause).
     mutating func dropArm(from angle: Double, lift: Double, at t: Double) {
         armTransition = (t, Self.dropDuration, angle, lift, 0, true)
+        armCorrections = []
     }
     static let dropDuration = 0.35
 
@@ -269,6 +284,7 @@ struct TurntableAnimator {
     func transitionsEnd(after t: Double) -> Double {
         var end = max(spin.rampEnd, labelFade.end, led.end, idle.end)
         if let tr = armTransition { end = max(end, tr.start + tr.duration) }
+        for c in armCorrections { end = max(end, c.start + Self.glideDuration) }
         return max(end, t)
     }
 
@@ -280,7 +296,33 @@ struct TurntableAnimator {
         return max(end, t + (input.duration - p))
     }
 
+    /// Hvor meget målet vægter i armens vinkel midt i en overgang (0 = startvinklen, 1 = målet).
+    private func targetWeight(_ tr: (start: Double, duration: Double, fromAngle: Double, fromLift: Double, lift: Double, glide: Bool),
+                              at t: Double) -> Double {
+        let s = (t - tr.start) / tr.duration
+        if s >= 1 { return 1 }
+        if tr.glide { return easeInOut(s) }
+        if s < 0.22 { return 0 }
+        if s < 0.78 { return easeInOut((s - 0.22) / 0.56) }
+        return 1
+    }
+
+    /// Summen af de rettelser, der stadig tones ud.
+    private func correction(at t: Double) -> Double {
+        armCorrections.reduce(0) { sum, c in
+            let s = (t - c.start) / Self.glideDuration
+            return s >= 1 ? sum : sum + c.amount * (1 - easeInOut(s))
+        }
+    }
+
     func pose(at t: Double) -> TurntablePose {
+        var p = basePose(at: t)
+        p.armAngle += correction(at: t)
+        return p
+    }
+
+    /// Posen uden rettelserne.
+    private func basePose(at t: Double) -> TurntablePose {
         var p = TurntablePose()
         p.recordAngle = spin.angle(at: t)
         p.fortyFive = fortyFive

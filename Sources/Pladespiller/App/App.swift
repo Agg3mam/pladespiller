@@ -11,6 +11,7 @@ import SwiftUI
 ///   --lyrics "Titel" "Kunstner" [sek]  hent sangtekst fra LRCLIB og print den
 ///   --unregister-login-item   meld "Åbn ved login" fra og afslut (scripts/uninstall.sh)
 ///   --window-selftest [dir]   tjek gitter/placering og tegn skallen til PNG (Vindue-agenten)
+///   --arm-test [dir]          grib/træk i armen med syntetiske musehændelser og mål animationen (Grafik-agenten)
 @main
 enum PladespillerMain {
     static func main() {
@@ -25,6 +26,14 @@ enum PladespillerMain {
             let dir = args.indices.contains(i + 1) ? args[i + 1] : "snapshots"
             SnapshotRenderer.run(outputDirectory: URL(fileURLWithPath: dir))
             exit(0)
+        }
+        if let i = args.firstIndex(of: "--arm-test") {
+            let dir = args.indices.contains(i + 1) ? URL(fileURLWithPath: args[i + 1]) : nil
+            if let dir { try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true) }
+            _ = NSApplication.shared
+            let result = ArmDragTest.run(dir: dir)
+            print(result.lines.joined(separator: "\n"))
+            exit(result.failures == 0 ? 0 : 1)
         }
         if args.contains("--nowplaying-log") || args.contains("--lyrics") {
             NowPlayingDebugCLI.run(mock: mock)

@@ -128,6 +128,10 @@ final class TurntableNSView: NSView {
 
     @objc private func woodLoaded() { rebuild() }
 
+    /// Kun test (ArmDragTest): lagene, så det viste billede kan aflæses.
+    var debugTurntable: TurntableLayer { turntable }
+    var debugAnimator: TurntableAnimator? { animator }
+
     /// Kun test (LiveSequenceTest): efterlign QA-fejlen N2.
     var debugFreezeAfterSync = false
 
@@ -138,7 +142,8 @@ final class TurntableNSView: NSView {
         guard delay > 0 else { return }
         let work = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated {
-                guard let self, let animator = self.animator, self.visible else { return }
+                // Mens armen holdes, styrer hånden løftet; sikkerhedsnettet lægges ind igen ved slip.
+                guard let self, let animator = self.animator, self.visible, self.armHold == nil else { return }
                 self.turntable.settle(animator, at: CACurrentMediaTime())
             }
         }
@@ -148,12 +153,15 @@ final class TurntableNSView: NSView {
 
     override func cursorUpdate(with event: NSEvent) { updateCursor(event) }
     override func mouseMoved(with event: NSEvent) { updateCursor(event) }
-    override func mouseExited(with event: NSEvent) { NSCursor.arrow.set() }
+    override func mouseExited(with event: NSEvent) { Self.setCursor(.arrow) }
+
+    /// Sætter cursoren. Testen (ArmDragTest) slår den fra: den må ikke ændre brugerens cursor (og den er langsom).
+    static var setCursor: (NSCursor) -> Void = { $0.set() }
 
     private func updateCursor(_ event: NSEvent) {
-        if armHold != nil { NSCursor.closedHand.set(); return }
+        if armHold != nil { Self.setCursor(.closedHand); return }
         let over = target(at: convert(event.locationInWindow, from: nil)) != nil
-        (over ? NSCursor.pointingHand : NSCursor.arrow).set()
+        Self.setCursor(over ? .pointingHand : .arrow)
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -183,7 +191,7 @@ final class TurntableNSView: NSView {
             return .speed(i == 0 ? .rpm33 : .rpm45)
         }
         // Armen (ved sin vinkel lige nu)
-        let a = turntable.visibleArmAngle()
+        let a = shownArm().angle
         let dx = p.x - g.pivot.x, dy = p.y - g.pivot.y
         let lx = dx * cos(a) + dy * sin(a), ly = -dx * sin(a) + dy * cos(a)
         let slack: CGFloat = 5
@@ -213,14 +221,23 @@ final class TurntableNSView: NSView {
         guard pressed == .arm, onArmSeek != nil, let g = geometry else { return }
         // Armen gribes med det samme: den løftes blødt og står stille (og musikken holder pause), præcis som når
         // man løfter armen på en rigtig pladespiller. Hold fast i det sted på armen, man tog fat.
-        let a = turntable.visibleArmAngle()
+        let t = CACurrentMediaTime()
+        let shown = shownArm(at: t)
+        let a = shown.angle
         let wasPlaying = animator?.input?.isPlaying == true
-        armHold = ArmHold(start: local, grab: Self.wrap(mouseAngle(local, g) - a), angle: a,
-                          liftFrom: turntable.visibleArmLift(), liftStart: CACurrentMediaTime(), pausedOnPress: wasPlaying)
+        armHold = ArmHold(start: local, grab: Self.wrap(mouseAngle(local, g) - a), angle: a, startAngle: a,
+                          liftFrom: shown.lift, liftStart: t, pausedOnPress: wasPlaying)
         dragClaim?.isClaimed = true          // et træk i armen flytter ikke widgetten
-        NSCursor.closedHand.set()
-        applyHold()
+        Self.setCursor(.closedHand)
+        // Pause med det samme i animationen (pladen bremser op), uden at vente på musikappens svar.
+        if wasPlaying, var input = animator?.input {
+            input.position = animator?.expectedPosition(at: t) ?? input.position
+            input.isPlaying = false
+            animator?.update(input, at: t)
+        }
+        expect(playing: false, position: nil, until: .infinity)
         if wasPlaying { onArmClick() }      // pause nu (et klik giver alligevel pause)
+        if animator != nil { resync(at: t) } else { applyHold() }     // armen i hånden (resten kører videre)
     }
 
     // MARK: Grib og træk i armen = spol
@@ -232,6 +249,8 @@ final class TurntableNSView: NSView {
         var start: NSPoint
         var grab: Double
         var angle: Double
+        /// Vinklen hvor armen blev grebet (fx på støtten): armen kan føres derhen igen uden at springe.
+        var startAngle: Double
         var liftFrom: Double
         var liftStart: Double
         var pausedOnPress: Bool
@@ -242,17 +261,32 @@ final class TurntableNSView: NSView {
     private static let liftDuration = 0.2
 
     /// Løftet under et greb til tiden t: blød ease-out fra `liftFrom` til `holdLift` over `liftDuration`.
+    /// Var armen allerede løftet mere (fx på vej mod støtten), bliver den deroppe – den dykker ikke.
     private func holdLift(_ h: ArmHold, at t: Double) -> Double {
         let s = min(1, max(0, (t - h.liftStart) / Self.liftDuration))
         let e = 1 - (1 - s) * (1 - s)
-        return h.liftFrom + (Self.holdLift - h.liftFrom) * e
+        return h.liftFrom + (max(Self.holdLift, h.liftFrom) - h.liftFrom) * e
     }
 
     /// Læg grebet (vinkel + resten af løftet) ind igen, fx efter at alle animationer er lagt om.
-    private func applyHold(at t: Double = CACurrentMediaTime()) {
+    /// Tiden tages først nu: kurven skal passe til det øjeblik, animationen faktisk starter (ellers et lille dyk).
+    private func applyHold() {
+        let t = CACurrentMediaTime()
         guard let h = armHold else { return }
         let remaining = max(0, h.liftStart + Self.liftDuration - t)
         turntable.holdArm(angle: h.angle, duration: remaining) { [h] dt in self.holdLift(h, at: t + dt) }
+    }
+
+    /// Armens vinkel og løft, som de vises til tiden t – regnet ud (i hånden, eller animatorens bevægelse) i stedet for
+    /// at spørge præsentationslaget. Præsentationslaget gemmes pr. CA-transaktion og kan være et øjeblik bagud; grebet
+    /// skal starte præcis på den kurve, animationerne er lavet af (ellers et lille hop i løftet eller vinklen).
+    private func shownArm(at t: Double = CACurrentMediaTime()) -> (angle: Double, lift: Double) {
+        if let h = armHold { return (h.angle, holdLift(h, at: t)) }
+        if let animator {
+            let p = animator.pose(at: t)
+            return (p.armAngle, p.armLift)
+        }
+        return (turntable.visibleArmAngle(), turntable.visibleArmLift())
     }
 
     private func mouseAngle(_ local: NSPoint, _ g: TurntableGeometry) -> Double {
@@ -262,20 +296,22 @@ final class TurntableNSView: NSView {
 
     private static func wrap(_ a: Double) -> Double { atan2(sin(a), cos(a)) }
 
-    /// Armvinklen for musen, klemt til rillerne (yderste … inderste), og fremdriften der hører til.
+    /// Armvinklen for musen, klemt til rillerne (yderste … inderste) – eller til der, hvor armen blev grebet, hvis det var
+    /// uden for rillerne (fx på støtten), så den ikke springer ind på pladen ved første træk. Og fremdriften der hører til.
     private func armPosition(_ local: NSPoint, _ h: ArmHold, _ g: TurntableGeometry) -> (angle: Double, progress: Double) {
         let raw = h.angle + Self.wrap(mouseAngle(local, g) - h.grab - h.angle)
-        let f = g.progress(forArmAngle: CGFloat(raw))
-        return (Double(g.armAngle(forProgress: f)), f)
+        let a0 = Double(g.armAngle(forProgress: 0)), a1 = Double(g.armAngle(forProgress: 1))
+        let lo = min(a0, a1, h.startAngle), hi = max(a0, a1, h.startAngle)
+        let angle = min(max(raw, lo), hi)
+        return (angle, g.progress(forArmAngle: CGFloat(angle)))
     }
 
     override func mouseDragged(with event: NSEvent) {
         guard var h = armHold, let g = geometry else { return }
         let local = convert(event.locationInWindow, from: nil)
-        if !h.moved {
-            guard hypot(local.x - h.start.x, local.y - h.start.y) > 3 else { return }
-            h.moved = true
-        }
+        // Armen følger musen fra første punkt (ellers hopper den op til 3 pt, når grænsen nås). Grænsen afgør kun,
+        // om det er et træk (spol) eller et klik.
+        if !h.moved, hypot(local.x - h.start.x, local.y - h.start.y) > 3 { h.moved = true }
         h.angle = armPosition(local, h, g).angle
         armHold = h
         turntable.moveHeldArm(angle: h.angle)        // kun vinklen: løftet kører videre uden at starte forfra
@@ -288,13 +324,16 @@ final class TurntableNSView: NSView {
             let t = CACurrentMediaTime()
             let progress = armPosition(local, h, g).progress
             let play = h.moved ? h.pausedOnPress : !h.pausedOnPress && bounds.contains(local)
-            // Fortæl straks animationen, hvad der sker (ny position, afspil), i stedet for at vente på musikappen –
-            // ellers når armen at glide mod støtten et øjeblik, før den kommer tilbage (et lille hop).
+            // Fortæl straks animationen, hvad der sker (ny position, afspil eller pause), i stedet for at vente på
+            // musikappen – ellers når armen at glide den forkerte vej et øjeblik, før svaret kommer.
             animator!.scrubbing = true
+            intent = nil
             if var input = animator!.input {
                 if h.moved, input.duration > 0 { input.position = progress * input.duration }
-                if play { input.isPlaying = true }
+                else { input.position = animator!.expectedPosition(at: t) ?? input.position }
+                input.isPlaying = play
                 animator!.update(input, at: t)
+                expect(playing: play, position: h.moved && input.duration > 0 ? input.position : nil, until: t + Self.intentWindow)
             }
             // Armen sænkes blødt fra der, hvor den holdes (til rillen, eller til støtten ved pause).
             animator!.dropArm(from: h.angle, lift: holdLift(h, at: t), at: t)
@@ -307,7 +346,7 @@ final class TurntableNSView: NSView {
             } else if !h.pausedOnPress, bounds.contains(local) {
                 onArmClick()                                  // klik på armen ved pause: afspil
             }
-            (target(at: local) != nil ? NSCursor.pointingHand : NSCursor.arrow).set()
+            Self.setCursor(target(at: local) != nil ? .pointingHand : .arrow)
             return
         }
         guard let pressed, bounds.contains(local), target(at: local) == pressed else { return }
@@ -374,15 +413,70 @@ final class TurntableNSView: NSView {
         let t = CACurrentMediaTime()
         if animator == nil { animator = TurntableAnimator(geometry: geometry) }
         let input = np.map { TurntableInput($0, at: .now) }
+        if let i = intent {
+            if t < i.until, let input, input.trackKey == i.trackKey, i.contradicts(input, at: t) {
+                heldBack = np            // vent: musikappen har sikkert bare ikke nået at følge med endnu
+                return
+            }
+            heldBack = nil
+        }
         if animator!.update(input, at: t) { resync(at: t) }
+    }
+
+    // MARK: Brugerens hensigt
+    //
+    // Når man griber eller slipper armen, ved animationen straks, hvad der skal ske (pause, spol, afspil). Musikappens
+    // svar kommer bagefter, og nogle af dem er forældede: fx "pause" fra trykket, der først lander efter slippet, eller
+    // "afspil" med den gamle position, før spolingen er nået frem. De ville sende armen den forkerte vej (mod støtten,
+    // eller tilbage og frem igen). Svar, der modsiger det brugeren lige har gjort, holdes derfor tilbage et øjeblik.
+    // Kommer der intet nyere, bruges det sidste alligevel bagefter (så er det fx brugeren, der har trykket pause i appen).
+
+    private struct Intent {
+        var trackKey: String
+        var playing: Bool
+        /// Position (s) til tiden `since` efter en spoling, ellers nil.
+        var position: Double?
+        var since: Double
+        var until: Double
+
+        func contradicts(_ input: TurntableInput, at t: Double) -> Bool {
+            if input.isPlaying != playing { return true }
+            guard let position else { return false }
+            let expected = position + (playing ? t - since : 0)
+            return abs(input.position - expected) > 1.5      // bekræftelsen må gerne afvige lidt (den glider)
+        }
+    }
+    private var intent: Intent?
+    private var heldBack: NowPlaying?
+    private var intentWork: DispatchWorkItem?
+    /// Så længe ventes der højst på, at musikappen følger med.
+    static let intentWindow = 1.0
+
+    private func expect(playing: Bool, position: Double?, until: Double) {
+        intentWork?.cancel()
+        guard let key = animator?.input?.trackKey else { intent = nil; return }
+        let t = CACurrentMediaTime()
+        intent = Intent(trackKey: key, playing: playing, position: position, since: t, until: until)
+        guard until.isFinite else { return }
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.intent = nil
+                if let np = self.heldBack { self.heldBack = nil; self.update(np) }
+            }
+        }
+        intentWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + (until - t), execute: work)
     }
 
     private func resync(at t: Double = CACurrentMediaTime()) {
         guard let animator else { return }
         if armHold != nil {
             // Armen holdes af brugeren: alt andet kører videre (pladen bremser fx op), armen bliver i hånden.
-            if visible { turntable.sync(animator, at: t) } else { turntable.applyFinal(animator, at: t) }
-            applyHold(at: t)
+            // Én transaktion, så der aldrig vises et billede med armen, som animatoren ser den, i stedet for i hånden.
+            CATransaction.begin()
+            if visible { turntable.sync(animator, at: t) { applyHold() } } else { turntable.applyFinal(animator, at: t); applyHold() }
+            CATransaction.commit()
             return
         }
         if visible {

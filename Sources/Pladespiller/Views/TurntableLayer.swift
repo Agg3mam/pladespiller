@@ -290,12 +290,21 @@ final class TurntableLayer {
     }
 
     /// Fjern alle animationer (fx når vinduet ikke er synligt).
-    func stopAnimations() {
+    func stopAnimations(keepSpin: Bool = false) {
         // Dæmpning og kroppens overtoning hører ikke til bevægelsen og må gerne løbe færdig.
         for l in allLayers {
-            for k in l.animationKeys() ?? [] where k != "dim" && k != "plinthFade" && k != "press" { l.removeAnimation(forKey: k) }
+            for k in l.animationKeys() ?? [] where k != "dim" && k != "plinthFade" && k != "press" && !(keepSpin && k == "spin") {
+                l.removeAnimation(forKey: k)
+            }
         }
+        if !keepSpin { laidSpin = nil }
     }
+
+    /// Den omdrejning, der ligger som animation nu. Er den uændret, får den lov at køre videre (helt uden hak).
+    private var laidSpin: SpinMotion?
+
+    /// Kun test (ArmDragTest): tidspunktet animationerne sidst blev regnet ud fra.
+    private(set) var debugLastStart: Double = 0
 
     /// Brugeren holder armen: den står stille ved `angle` (ingen animationer på vinklen). Løftet følger `lift`
     /// (tid fra nu → løft) de næste `duration` sekunder og ender på `lift(duration)`.
@@ -348,24 +357,75 @@ final class TurntableLayer {
         return -v
     }
 
+    /// Kun test (ArmDragTest): skyggens vinkel og pladens vinkel, som de ses lige nu.
+    func visibleShadowAngle() -> Double {
+        -((shadowRot.presentation() ?? shadowRot).value(forKeyPath: "transform.rotation.z") as? Double ?? 0)
+    }
+    func visibleRecordAngle() -> Double {
+        -((rotor.presentation() ?? rotor).value(forKeyPath: "transform.rotation.z") as? Double ?? 0)
+    }
+
     /// Læg bevægelsen fra `animator` ind som CA-animationer fra tiden `t` (CACurrentMediaTime).
     /// Kaldes kun når tilstanden ændrer sig – ikke pr. billede.
-    func sync(_ animator: TurntableAnimator, at t: Double) {
+    /// `beforeSpin` kører lige før omdrejningen lægges ind (fx armen i hånden), så pladen kommer sidst og starter så
+    /// tæt på commit som muligt.
+    func sync(_ animator: TurntableAnimator, at t: Double, beforeSpin: () -> Void = {}) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        stopAnimations()
+        let spin = animator.spin
+        let keepSpin = laidSpin == spin && rotor.animation(forKey: "spin") != nil
+        stopAnimations(keepSpin: keepSpin)
+
+        // Armens vej regnes først ud. Det tager lidt tid, og animationerne starter først, når transaktionen committes:
+        // de beskæres derfor til at starte "nu" (`start`) i stedet for ved `t` – ellers hakker pladen og armen en smule
+        // tilbage, hver gang animationerne lægges om (fx når musikappen svarer midt i en bevægelse).
+        let tEnd = animator.transitionsEnd(after: t)
+        let armEnd = animator.armMotionEnd(after: t)
+        let dense = Self.samples(from: t, to: tEnd, step: 1.0 / 120)
+        let sparseStep = max(1.0, (armEnd - tEnd) / 600)
+        let sparse = armEnd > tEnd + 0.01 ? Array(Self.samples(from: tEnd, to: armEnd, step: sparseStep).dropFirst()) : []
+        let densePoses = dense.map(animator.pose(at:))
+        let armTimes = dense + sparse
+        let armPoses = densePoses + sparse.map(animator.pose(at:))
+        let start = max(t, CACurrentMediaTime())
+        debugLastStart = start
+
+        // Resten: tætte samples gennem overgangene, derefter glisne samples af armens langsomme vej ind over pladen.
+        let now = animator.pose(at: t)
+        setLabels(now)
+        applyNonRotor(armPoses.last ?? now)
+
+        // Armen bevæger sig langsomt over pladen: lav billedrate er nok (en hel overgang styres af de korte animationer).
+        let armRange = Self.smoothRange   // samme billedrate som de korte animationer (N2: ingen særbehandling)
+        keyframes(armRot, "transform.rotation.z", armTimes, armPoses.map { -$0.armAngle }, key: "arm", range: armRange, from: start)
+        keyframes(shadowRot, "transform.rotation.z", armTimes, armPoses.map { -$0.armAngle }, key: "arm", range: armRange, from: start)
+        keyframes(armImage, "transform.scale", dense, densePoses.map { armScale($0.armLift) }, key: "lift", from: start)
+        keyframes(shadowImage, "transform.scale", dense, densePoses.map { shadowScale($0.armLift) }, key: "lift", from: start)
+        keyframes(shadowImage, "opacity", dense, densePoses.map { shadowOpacity($0.armLift) }, key: "liftOpacity", from: start)
+        keyframes(shadowMove, "position", dense, densePoses.map { NSValue(point: shadowOffset($0.armLift)) }, key: "lift", from: start)
+        keyframes(previousGroup, "opacity", dense, densePoses.map(\.previousLabelOpacity), key: "fade", from: start)
+        keyframes(ledGlow, "opacity", dense, densePoses.map(\.led), key: "led", from: start)
+        for l in idleTargets { keyframes(l, "opacity", dense, densePoses.map { rootOpacity($0.idle) }, key: "idle", from: start) }
+        beforeSpin()
 
         // Rotor: rampe (keyframes af den integrerede vinkel) + evt. uendelig jævn omdrejning bagefter – samlet i én
         // gruppe med RELATIVE tider (QA N2): ingen absolutte beginTime'er, som kan forskydes af vinduets tidsbase.
-        let spin = animator.spin
-        let rampEnd = max(t, spin.rampEnd)
+        // Er omdrejningen uændret (fx når kun armen flytter sig), røres den ikke. Pladen drejer hurtigst, så den regnes
+        // ud til allersidst, med sit eget "nu".
+        if !keepSpin { laySpin(spin, from: max(t, CACurrentMediaTime())) }
+        CATransaction.commit()
+    }
+
+    private func laySpin(_ spin: SpinMotion, from start: Double) {
+        laidSpin = spin
+        let rampEnd = max(start, spin.rampEnd)
         var parts: [CAAnimation] = []
-        if rampEnd > t {
-            let times = Self.samples(from: t, to: rampEnd, step: 1.0 / 120)
+        if rampEnd > start {
+            let times = Self.samples(from: start, to: rampEnd, step: 1.0 / 120)
             let ramp = CAKeyframeAnimation(keyPath: "transform.rotation.z")
             ramp.values = times.map { -spin.angle(at: $0) }
-            ramp.keyTimes = times.map { NSNumber(value: ($0 - t) / (rampEnd - t)) }
-            ramp.duration = rampEnd - t
+            ramp.keyTimes = times.map { NSNumber(value: ($0 - start) / (rampEnd - start)) }
+            ramp.duration = rampEnd - start
             ramp.calculationMode = .linear
             parts.append(ramp)
         }
@@ -376,48 +436,21 @@ final class TurntableLayer {
             cruise.toValue = -(a + 2 * .pi)
             cruise.duration = 2 * .pi / spin.targetVelocity      // valgt fart (settings.spinSpeed)
             cruise.repeatCount = .infinity
-            cruise.beginTime = rampEnd - t          // relativt til gruppen
+            cruise.beginTime = rampEnd - start      // relativt til gruppen
             parts.append(cruise)
-            rotor.setValue(-spin.angle(at: t), forKeyPath: "transform.rotation.z")
+            rotor.setValue(-spin.angle(at: start), forKeyPath: "transform.rotation.z")
         } else {
             rotor.setValue(-spin.angle(at: rampEnd), forKeyPath: "transform.rotation.z")
         }
         if !parts.isEmpty {
             let group = CAAnimationGroup()
             group.animations = parts
-            group.duration = spin.targetVelocity > 0 ? .greatestFiniteMagnitude : rampEnd - t
+            group.duration = spin.targetVelocity > 0 ? .greatestFiniteMagnitude : rampEnd - start
             group.beginTime = 0                      // = "nu", når transaktionen committes
             group.isRemovedOnCompletion = true
             group.preferredFrameRateRange = Self.smoothRange
             rotor.add(group, forKey: "spin")
         }
-
-        // Resten: tætte samples gennem overgangene, derefter glisne samples af armens langsomme vej ind over pladen.
-        let tEnd = animator.transitionsEnd(after: t)
-        let armEnd = animator.armMotionEnd(after: t)
-        let dense = Self.samples(from: t, to: tEnd, step: 1.0 / 120)
-        let sparseStep = max(1.0, (armEnd - tEnd) / 600)
-        let sparse = armEnd > tEnd + 0.01 ? Array(Self.samples(from: tEnd, to: armEnd, step: sparseStep).dropFirst()) : []
-        let densePoses = dense.map(animator.pose(at:))
-        let armTimes = dense + sparse
-        let armPoses = densePoses + sparse.map(animator.pose(at:))
-
-        let now = animator.pose(at: t)
-        setLabels(now)
-        applyNonRotor(armPoses.last ?? now)
-
-        // Armen bevæger sig langsomt over pladen: lav billedrate er nok (en hel overgang styres af de korte animationer).
-        let armRange = Self.smoothRange   // samme billedrate som de korte animationer (N2: ingen særbehandling)
-        keyframes(armRot, "transform.rotation.z", armTimes, armPoses.map { -$0.armAngle }, key: "arm", range: armRange)
-        keyframes(shadowRot, "transform.rotation.z", armTimes, armPoses.map { -$0.armAngle }, key: "arm", range: armRange)
-        keyframes(armImage, "transform.scale", dense, densePoses.map { armScale($0.armLift) }, key: "lift")
-        keyframes(shadowImage, "transform.scale", dense, densePoses.map { shadowScale($0.armLift) }, key: "lift")
-        keyframes(shadowImage, "opacity", dense, densePoses.map { shadowOpacity($0.armLift) }, key: "liftOpacity")
-        keyframes(shadowMove, "position", dense, densePoses.map { NSValue(point: shadowOffset($0.armLift)) }, key: "lift")
-        keyframes(previousGroup, "opacity", dense, densePoses.map(\.previousLabelOpacity), key: "fade")
-        keyframes(ledGlow, "opacity", dense, densePoses.map(\.led), key: "led")
-        for l in idleTargets { keyframes(l, "opacity", dense, densePoses.map { rootOpacity($0.idle) }, key: "idle") }
-        CATransaction.commit()
     }
 
     static func samples(from a: Double, to b: Double, step: Double) -> [Double] {
@@ -436,7 +469,9 @@ final class TurntableLayer {
     @discardableResult
     private func keyframes(_ layer: CALayer, _ keyPath: String, _ times: [Double], _ values: [Any], key: String,
                            fillMode: CAMediaTimingFillMode = .removed, removedOnCompletion: Bool = true,
-                           range: CAFrameRateRange = TurntableLayer.smoothRange) -> CAKeyframeAnimation? {
+                           range: CAFrameRateRange = TurntableLayer.smoothRange, from start: Double? = nil) -> CAKeyframeAnimation? {
+        var times = times, values = values
+        if let start { (times, values) = Self.trim(times, values, from: start) }
         guard times.count >= 2, values.count == times.count, let first = times.first, let last = times.last, last > first else { return nil }
         // NB: [Double] kan bridges til [NSNumber] (= NSValue), så tal tjekkes først og punkter kun hvis det ikke er tal.
         if let nums = values as? [Double] {
@@ -457,6 +492,22 @@ final class TurntableLayer {
         anim.preferredFrameRateRange = range
         layer.add(anim, forKey: key)
         return anim
+    }
+
+    /// Skær starten af en keyframe-kurve af, så den begynder ved `start` (værdien dér interpoleres lineært, som CA gør).
+    static func trim(_ times: [Double], _ values: [Any], from start: Double) -> ([Double], [Any]) {
+        guard let first = times.first, start > first, times.count == values.count else { return (times, values) }
+        guard let i = times.firstIndex(where: { $0 > start }) else { return ([start], [values[values.count - 1]]) }   // forbi
+        let f = (start - times[i - 1]) / (times[i] - times[i - 1])
+        let v: Any
+        if let a = values[i - 1] as? Double, let b = values[i] as? Double {
+            v = a + (b - a) * f
+        } else if let a = (values[i - 1] as? NSValue)?.pointValue, let b = (values[i] as? NSValue)?.pointValue {
+            v = NSValue(point: NSPoint(x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f))
+        } else {
+            v = values[i]
+        }
+        return ([start] + times[i...], [v] + values[i...])
     }
 
     // MARK: Dæmpning (falmet look)

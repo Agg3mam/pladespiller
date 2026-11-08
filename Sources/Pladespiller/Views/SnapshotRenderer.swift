@@ -64,6 +64,12 @@ enum SnapshotRenderer {
         let live = LiveSequenceTest.run(dir: dir)
         try? live.joined(separator: "\n").write(to: dir.appendingPathComponent("live-tjek.txt"), atomically: true, encoding: .utf8)
         print(live.joined(separator: "\n"))
+        // Grib og træk i armen (ca. 40 s): målt pr. billede ved 60 og 120 Hz. Kan springes over med PLADESPILLER_SKIP_ARM=1.
+        if ProcessInfo.processInfo.environment["PLADESPILLER_SKIP_ARM"] != "1" {
+            let arm = ArmDragTest.run(dir: dir)
+            try? arm.lines.joined(separator: "\n").write(to: dir.appendingPathComponent("arm-tjek.txt"), atomically: true, encoding: .utf8)
+            print(arm.lines.joined(separator: "\n"))
+        }
         if ProcessInfo.processInfo.environment["PLADESPILLER_SNAPSHOT_ONLY_LIVE"] == "1" { return }
         woodCloseUp(dir)
         if ProcessInfo.processInfo.environment["PLADESPILLER_SNAPSHOT_ONLY_WOOD"] == "1" { return }
