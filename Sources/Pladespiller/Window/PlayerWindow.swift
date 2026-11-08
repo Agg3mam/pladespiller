@@ -48,8 +48,7 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
         w.isReleasedWhenClosed = false
         w.delegate = self
         w.contentView = NSHostingView(rootView: makeContent())
-        if !w.setFrameUsingName("PladespillerVindue") { w.center() }
-        w.setFrameAutosaveName("PladespillerVindue")
+        if let saved = Self.savedFrame() { w.setFrame(saved, display: false) } else { w.center() }
         window = w
         UserDefaults.standard.set(true, forKey: Self.openKey)
         NSApp.setActivationPolicy(.regular)
@@ -72,7 +71,22 @@ final class PlayerWindowController: NSObject, NSWindowDelegate {
     func windowDidChangeScreen(_ notification: Notification) { saveFrame() }
     func windowDidResize(_ notification: Notification) { if window?.inLiveResize == false { saveFrame() } }
 
-    private func saveFrame() { window?.saveFrame(usingName: "PladespillerVindue") }
+    /// Egen gemning af rammen (AppKits `setFrameUsingName` lagde vinduet på hovedskærmen igen, når det stod på
+    /// den ekstra skærm). Bruges kun, hvis rammen stadig ligger mindst halvt på en tilsluttet skærm.
+    static let frameKey = "pladespiller.playerWindow.frame"
+
+    private func saveFrame() {
+        guard let w = window else { return }
+        UserDefaults.standard.set(NSStringFromRect(w.frame), forKey: Self.frameKey)
+    }
+
+    static func savedFrame() -> NSRect? {
+        guard let s = UserDefaults.standard.string(forKey: frameKey) else { return nil }
+        let r = NSRectFromString(s)
+        guard r.width >= 200, r.height >= 150 else { return nil }
+        let onScreen = NSScreen.screens.contains { NewWindowMover.fractionOnScreen(r, screen: $0.frame) > 0.5 }
+        return onScreen ? r : nil
+    }
 
     func windowWillClose(_ notification: Notification) {
         // Brugeren lukkede vinduet (ikke appen, der afsluttes: så kaldes dette ikke).
