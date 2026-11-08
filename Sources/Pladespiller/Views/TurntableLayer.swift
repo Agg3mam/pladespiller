@@ -297,8 +297,9 @@ final class TurntableLayer {
         }
     }
 
-    /// Brugeren trækker armen: den følger musen direkte (ingen animationer), løftet `lift`.
-    func setManualArm(angle: Double, lift: Double) {
+    /// Brugeren holder armen: den står stille ved `angle` (ingen animationer på vinklen) og løftes blødt fra
+    /// `liftFrom` til `liftTo` over `duration` sekunder (0 = med det samme).
+    func holdArm(angle: Double, liftFrom: Double, liftTo: Double, duration: Double) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         for l in [armRot, shadowRot] { l.removeAnimation(forKey: "arm") }
@@ -306,11 +307,32 @@ final class TurntableLayer {
         shadowImage.removeAnimation(forKey: "liftOpacity")
         armRot.setValue(-angle, forKeyPath: "transform.rotation.z")
         shadowRot.setValue(-angle, forKeyPath: "transform.rotation.z")
-        armImage.setValue(armScale(lift), forKeyPath: "transform.scale")
-        shadowImage.setValue(shadowScale(lift), forKeyPath: "transform.scale")
-        shadowImage.opacity = Float(shadowOpacity(lift))
-        shadowMove.position = shadowOffset(lift)
+        armImage.setValue(armScale(liftTo), forKeyPath: "transform.scale")
+        shadowImage.setValue(shadowScale(liftTo), forKeyPath: "transform.scale")
+        shadowImage.opacity = Float(shadowOpacity(liftTo))
+        shadowMove.position = shadowOffset(liftTo)
+        if duration > 0.005, abs(liftTo - liftFrom) > 1e-3 {
+            func add(_ l: CALayer, _ path: String, _ from: Any, _ to: Any, _ key: String) {
+                let a = CABasicAnimation(keyPath: path)
+                a.fromValue = from
+                a.toValue = to
+                a.duration = duration
+                a.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                a.preferredFrameRateRange = Self.smoothRange
+                l.add(a, forKey: key)
+            }
+            add(armImage, "transform.scale", armScale(liftFrom), armScale(liftTo), "lift")
+            add(shadowImage, "transform.scale", shadowScale(liftFrom), shadowScale(liftTo), "lift")
+            add(shadowImage, "opacity", shadowOpacity(liftFrom), shadowOpacity(liftTo), "liftOpacity")
+            add(shadowMove, "position", NSValue(point: shadowOffset(liftFrom)), NSValue(point: shadowOffset(liftTo)), "lift")
+        }
         CATransaction.commit()
+    }
+
+    /// Armens løft som det ses lige nu (0 = nede).
+    func visibleArmLift() -> Double {
+        let v = (armImage.presentation() ?? armImage).value(forKeyPath: "transform.scale") as? Double ?? 1
+        return max(0, (v - 1) / 0.045)
     }
 
     /// Armens vinkel som den ses lige nu (præsentationslaget), til klik på armen.
