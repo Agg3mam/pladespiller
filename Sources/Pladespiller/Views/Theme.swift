@@ -49,18 +49,30 @@ struct TurntableStyle: Hashable {
                                  customHex: String, flatArmDark: Bool?) -> TurntableStyle {
         switch theme {
         case .flat:
-            TurntableStyle(plinth: flatMaterial(flatColor, customHex: customHex, artwork: artwork), darkHardware: false,
-                           flatArmDark: flatArmDark ?? SystemAppearance.shared.isDark)
-        case .wood: TurntableStyle(plinth: .wood(woodSpecies), darkHardware: false)
-        case .aluminium: TurntableStyle(plinth: .aluminium, darkHardware: true)
-        case .black: TurntableStyle(plinth: .black, darkHardware: false)
+            let material = flatMaterial(flatColor, customHex: customHex, artwork: artwork)
+            return TurntableStyle(plinth: material, darkHardware: false,
+                                  flatArmDark: readableArm(dark: flatArmDark ?? SystemAppearance.shared.isDark, on: material))
+        case .wood: return TurntableStyle(plinth: .wood(woodSpecies), darkHardware: false)
+        case .aluminium: return TurntableStyle(plinth: .aluminium, darkHardware: true)
+        case .black: return TurntableStyle(plinth: .black, darkHardware: false)
         case .auto:
             if let artwork, let material = autoMaterial(for: artwork) {
-                TurntableStyle(plinth: material, darkHardware: false)
+                return TurntableStyle(plinth: material, darkHardware: false)
             } else {
-                TurntableStyle(plinth: .black, darkHardware: false)
+                return TurntableStyle(plinth: .black, darkHardware: false)
             }
         }
+    }
+
+    /// Flad: armen følger lys/mørk tilstand – men aldrig så den forsvinder. En sort arm på en sort eller mørkeblå krop
+    /// (eller en hvid arm på en hvid krop) kan næsten ikke ses; så bruges den modsatte farve.
+    static func readableArm(dark: Bool, on material: PlinthMaterial) -> Bool {
+        guard case let .flat(r, g, b) = material else { return dark }
+        let body = SIMD3(r, g, b)
+        let darkArm = FlatPalette.contrast(SIMD3(0.122, 0.125, 0.137), body)
+        let lightArm = FlatPalette.contrast(SIMD3(0.965, 0.965, 0.953), body)
+        if dark { return !(darkArm < 2.2 && lightArm > darkArm) }
+        return lightArm < 1.25 && darkArm > lightArm
     }
 
     /// Auto-farven pr. cover caches (QA M4): gennemsnitsfarven regnes kun én gang pr. coverbillede.

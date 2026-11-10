@@ -534,12 +534,13 @@ enum ArmDragTest {
                     if !isLast { dropDist = max(dropDist, abs(a1 - rest) * deg) }
                     minDist = .infinity
                 }
-                // Løftet falder blødt og stiger aldrig igen efter slip (i det første billede må det have nået at stige
-                // lidt endnu, før der blev sluppet)
-                let rise = q.phase == .dropped(k) ? 0 : 2 * max(holdTarget - pressLift, 0) / 0.2 * dt * 1.3
+                // Løftet falder blødt efter slip. Det eneste, der må løfte armen igen, er den tilsigtede fjeder (nålen hopper
+                // to gange, når den er landet); i det første billede må løftet også have nået at stige lidt endnu.
+                let springStep = AnimatorConstants.springRate * dt * 1.3
+                let rise = (q.phase == .dropped(k) ? 0 : 2 * max(holdTarget - pressLift, 0) / 0.2 * dt * 1.3) + springStep
                 note("løftet stiger efter slip", max(0, dl - rise))
                 if dl > 0.002 + rise { fail("slip-løft-op", dl, String(format: "armen løftes igen (%.3f) efter slip %@", dl, rel(i))) }
-                let liftLim = 1.5 * 0.75 / AnimatorConstants.drop * dt * 1.3 + 0.01
+                let liftLim = max(1.5 * 0.75 / AnimatorConstants.drop * dt * 1.3 + 0.01, springStep)
                 if -dl > liftLim { fail("slip-løft-spring", -dl, String(format: "løftet falder %.3f på ét billede (grænse %.3f) %@", -dl, liftLim, rel(i))) }
                 // Vinklen: ingen spring, ingen ryk (pludselig fartændring)
                 let vmax = 1.5 * dropDist / AnimatorConstants.drop
@@ -577,7 +578,13 @@ enum ArmDragTest {
         return issues.sorted { $0.key < $1.key }.map(\.value.text)
     }
 
-    enum AnimatorConstants { static let drop = TurntableAnimator.dropDuration }
+    enum AnimatorConstants {
+        /// Glidet efter et slip (fjederen bagefter har sin egen grænse, `springStep`).
+        static let drop = TurntableAnimator.dropMove
+        /// Fjederen efter et slip er tilsigtet: nålen hopper to gange. Så meget må løftet højst ændre sig pr. sekund
+        /// (hoppets højde × dets stejleste hældning) – et større skridt er stadig et hop, der ikke skal være der.
+        static let springRate = TurntableAnimator.dropBounce * 2 * Double.pi / TurntableAnimator.dropTail
+    }
 
     static func dump(_ r: Run, hz: Double) -> String {
         var out = ["# \(Int(hz)) Hz · \(r.scenario.name) · \(r.replies.name)", "t;fase;mus;arm;løft;plade"]

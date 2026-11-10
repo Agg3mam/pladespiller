@@ -45,7 +45,7 @@ enum ChristmasDrawing {
     ]
 
     static let span: CGFloat = 112           // afstand mellem krogene (pt ved scale 1)
-    static let sag: CGFloat = 6
+    static let sag: CGFloat = 8              // dybere buer: kæden hænger, den er ikke spændt ud
 
     /// Ledningen hænger i buer mellem kroge i toppen.
     static func hooks(width: CGFloat, scale: CGFloat) -> [CGFloat] {
@@ -84,7 +84,7 @@ enum ChristmasDrawing {
     }
 
     /// En klassisk julepære (C9): sokkel øverst, glasset buler ud og ender i en afrundet spids.
-    static func bulbSize(_ scale: CGFloat) -> CGSize { CGSize(width: 10 * scale, height: 17 * scale) }
+    static func bulbSize(_ scale: CGFloat) -> CGSize { CGSize(width: 12.5 * scale, height: 21 * scale) }
 
     static func glassPath(_ s: CGSize) -> CGPath {
         let w = s.width, h = s.height, top = h * 0.3
@@ -112,6 +112,12 @@ enum ChristmasDrawing {
             ctx.move(to: CGPoint(x: socket.minX + 0.5, y: y)); ctx.addLine(to: CGPoint(x: socket.maxX - 0.5, y: y))
         }
         ctx.strokePath()
+        // messingkrave, hvor glasset sidder i soklen (fanger lyset)
+        let collar = CGRect(x: -w * 0.31, y: socket.maxY - h * 0.055, width: w * 0.62, height: h * 0.07)
+        Drawing.fill(ctx, CGPath(roundedRect: collar, cornerWidth: h * 0.02, cornerHeight: h * 0.02, transform: nil),
+                     Drawing.gradient([(0, Drawing.color(0.45, 0.32, 0.10)), (0.35, Drawing.color(1.0, 0.86, 0.48)),
+                                       (0.6, Drawing.color(0.80, 0.60, 0.22)), (1, Drawing.color(0.35, 0.24, 0.07))]),
+                     from: CGPoint(x: collar.minX, y: 0), to: CGPoint(x: collar.maxX, y: 0))
 
         // glasset
         let glass = glassPath(s)
@@ -121,9 +127,11 @@ enum ChristmasDrawing {
         if lit {
             // varm, næsten hvid kerne → mættet farve → mørkere kant (lyset bryder i glasset)
             let core = (min(1, c.0 + 0.55), min(1, c.1 + 0.55), min(1, c.2 + 0.45))
-            ctx.drawRadialGradient(Drawing.gradient([(0, Drawing.color(core.0, core.1, core.2)), (0.38, Drawing.color(c.0, c.1, c.2)),
-                                                     (1, Drawing.color(c.0 * 0.62, c.1 * 0.62, c.2 * 0.62))]),
-                                   startCenter: center, startRadius: 0, endCenter: center, endRadius: h * 0.48, options: [.drawsAfterEndLocation])
+            ctx.drawRadialGradient(Drawing.gradient([(0, Drawing.color(1, 1, 0.96)), (0.16, Drawing.color(core.0, core.1, core.2)),
+                                                     (0.50, Drawing.color(c.0, c.1, c.2)),
+                                                     (1, Drawing.color(c.0 * 0.55, c.1 * 0.55, c.2 * 0.55))]),
+                                   startCenter: CGPoint(x: 0, y: h * 0.58), startRadius: 0, endCenter: center, endRadius: h * 0.50,
+                                   options: [.drawsAfterEndLocation])
         } else {
             ctx.drawRadialGradient(Drawing.gradient([(0, Drawing.color(c.0 * 0.62, c.1 * 0.62, c.2 * 0.62)), (1, Drawing.color(c.0 * 0.3, c.1 * 0.3, c.2 * 0.3))]),
                                    startCenter: center, startRadius: 0, endCenter: center, endRadius: h * 0.48, options: [.drawsAfterEndLocation])
@@ -143,6 +151,23 @@ enum ChristmasDrawing {
         ctx.setStrokeColor(Drawing.gray(1, lit ? 0.75 : 0.55)); ctx.setLineWidth(max(0.6, 1.1 * scale)); ctx.setLineCap(.round); ctx.strokePath()
         ctx.addEllipse(in: CGRect(x: w * 0.12, y: h * 0.42, width: w * 0.12, height: w * 0.12))
         ctx.setFillColor(Drawing.gray(1, lit ? 0.6 : 0.4)); ctx.fillPath()
+        // kantlys i den modsatte side (lys der går gennem glasset og samles i kanten)
+        let rim = CGMutablePath()
+        rim.move(to: CGPoint(x: w * 0.40, y: h * 0.56))
+        rim.addQuadCurve(to: CGPoint(x: w * 0.20, y: h * 0.90), control: CGPoint(x: w * 0.44, y: h * 0.78))
+        ctx.addPath(rim)
+        ctx.setStrokeColor(Drawing.color(min(1, c.0 + 0.5), min(1, c.1 + 0.5), min(1, c.2 + 0.5), lit ? 0.55 : 0.22))
+        ctx.setLineWidth(max(0.5, 0.8 * scale)); ctx.strokePath()
+        if lit {
+            // et lille stjerneglimt, hvor lyset rammer glasset
+            let g = CGPoint(x: -w * 0.24, y: h * 0.50), r = w * 0.20
+            ctx.setStrokeColor(Drawing.gray(1, 0.9)); ctx.setLineWidth(max(0.4, 0.55 * scale))
+            ctx.move(to: CGPoint(x: g.x - r, y: g.y)); ctx.addLine(to: CGPoint(x: g.x + r, y: g.y))
+            ctx.move(to: CGPoint(x: g.x, y: g.y - r)); ctx.addLine(to: CGPoint(x: g.x, y: g.y + r))
+            ctx.strokePath()
+            ctx.addEllipse(in: CGRect(x: g.x - r * 0.3, y: g.y - r * 0.3, width: r * 0.6, height: r * 0.6))
+            ctx.setFillColor(Drawing.gray(1, 1)); ctx.fillPath()
+        }
         // glaskant
         ctx.addPath(glass)
         ctx.setStrokeColor(Drawing.color(c.0 * 0.35, c.1 * 0.35, c.2 * 0.35, 0.55)); ctx.setLineWidth(max(0.4, 0.5 * scale)); ctx.strokePath()
@@ -156,13 +181,14 @@ enum ChristmasDrawing {
         }
     }
 
-    static func glowRadius(_ scale: CGFloat) -> CGFloat { 24 * scale }
+    static func glowRadius(_ scale: CGFloat) -> CGFloat { 36 * scale }
 
     static func glowImage(_ color: Int, scale: CGFloat, pixelScale: CGFloat) -> CGImage? {
         let r = glowRadius(scale), c = colors[color]
         return Drawing.image(size: CGSize(width: r * 2, height: r * 2), scale: pixelScale) { ctx in
-            ctx.drawRadialGradient(Drawing.gradient([(0, Drawing.color(c.0, c.1, c.2, 0.85)), (0.18, Drawing.color(c.0, c.1, c.2, 0.45)),
-                                                     (0.5, Drawing.color(c.0, c.1, c.2, 0.14)), (1, Drawing.color(c.0, c.1, c.2, 0))]),
+            ctx.drawRadialGradient(Drawing.gradient([(0, Drawing.color(min(1, c.0 + 0.3), min(1, c.1 + 0.3), min(1, c.2 + 0.3), 0.95)),
+                                                     (0.12, Drawing.color(c.0, c.1, c.2, 0.62)), (0.32, Drawing.color(c.0, c.1, c.2, 0.26)),
+                                                     (0.62, Drawing.color(c.0, c.1, c.2, 0.08)), (1, Drawing.color(c.0, c.1, c.2, 0))]),
                                    startCenter: CGPoint(x: r, y: r), startRadius: 0, endCenter: CGPoint(x: r, y: r), endRadius: r, options: [])
         }
     }
@@ -209,13 +235,19 @@ enum ChristmasDrawing {
             }
             guard lights else { return }
             ctx.addPath(wire(width: size.width, scale: scale))
-            ctx.setStrokeColor(Drawing.color(0.06, 0.13, 0.07, 0.95)); ctx.setLineWidth(1.3 * scale); ctx.strokePath()
+            ctx.setStrokeColor(Drawing.color(0.04, 0.10, 0.05, 0.97)); ctx.setLineWidth(1.9 * scale); ctx.strokePath()
+            // snoet ledning: en lysere part ovenpå, i korte stykker
+            ctx.addPath(wire(width: size.width, scale: scale))
+            ctx.setStrokeColor(Drawing.color(0.20, 0.36, 0.20, 0.9)); ctx.setLineWidth(0.7 * scale)
+            ctx.setLineDash(phase: 0, lengths: [2.2 * scale, 2.2 * scale]); ctx.strokePath()
+            ctx.setLineDash(phase: 0, lengths: [])
             let bs = bulbSize(scale)
             for (i, b) in bulbs(width: size.width, scale: scale).enumerated() {
                 let c = colors[b.color], on = i % 4 != 1
                 let r = glowRadius(scale), gc = CGPoint(x: b.p.x, y: b.p.y + bs.height * 0.62)
-                ctx.drawRadialGradient(Drawing.gradient([(0, Drawing.color(c.0, c.1, c.2, on ? 0.8 : 0.25)), (0.18, Drawing.color(c.0, c.1, c.2, on ? 0.4 : 0.1)),
-                                                         (1, Drawing.color(c.0, c.1, c.2, 0))]),
+                ctx.drawRadialGradient(Drawing.gradient([(0, Drawing.color(c.0, c.1, c.2, on ? 0.9 : 0.25)), (0.12, Drawing.color(c.0, c.1, c.2, on ? 0.6 : 0.12)),
+                                                         (0.32, Drawing.color(c.0, c.1, c.2, on ? 0.26 : 0.05)),
+                                                         (0.62, Drawing.color(c.0, c.1, c.2, on ? 0.08 : 0)), (1, Drawing.color(c.0, c.1, c.2, 0))]),
                                        startCenter: gc, startRadius: 0, endCenter: gc, endRadius: r, options: [])
                 ctx.saveGState()
                 ctx.translateBy(x: b.p.x, y: b.p.y)
@@ -247,6 +279,8 @@ final class ChristmasNSView: NSView {
     /// Sneen: ét lag pr. fnug (falder og svajer i Core Animation). Ligger i viewets almindelige lag (y opad).
     private let snowLayer = CALayer()
     private let wire = CAShapeLayer()
+    /// Den lysere part i den snoede ledning.
+    private let wireTwist = CAShapeLayer()
     private var bulbs: [CALayer] = []
     private var built: (CGSize, CGFloat, Bool, Bool)?
     private var scale: CGFloat = 1
@@ -262,6 +296,8 @@ final class ChristmasNSView: NSView {
         root.isGeometryFlipped = true                     // lyskæden: y nedad, som tegningerne
         root.addSublayer(wire)
         wire.fillColor = nil
+        root.addSublayer(wireTwist)
+        wireTwist.fillColor = nil
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -339,11 +375,22 @@ final class ChristmasNSView: NSView {
         bulbs.forEach { $0.removeFromSuperlayer() }
         bulbs = []
         wire.isHidden = !lights
+        wireTwist.isHidden = !lights
         if lights {
             wire.frame = root.bounds
             wire.path = ChristmasDrawing.wire(width: size.width, scale: scale)
-            wire.strokeColor = Drawing.color(0.06, 0.13, 0.07, 0.95)
-            wire.lineWidth = 1.3 * scale
+            wire.strokeColor = Drawing.color(0.04, 0.10, 0.05, 0.97)
+            wire.lineWidth = 1.9 * scale
+            // lidt skygge under kæden, så den hænger foran pladespilleren og ikke er malet på den
+            wire.shadowColor = CGColor(gray: 0, alpha: 1)
+            wire.shadowOpacity = 0.35
+            wire.shadowRadius = 1.5 * scale
+            wire.shadowOffset = CGSize(width: 0, height: 1.5 * scale)
+            wireTwist.frame = root.bounds
+            wireTwist.path = wire.path
+            wireTwist.strokeColor = Drawing.color(0.20, 0.36, 0.20, 0.9)
+            wireTwist.lineWidth = 0.7 * scale
+            wireTwist.lineDashPattern = [NSNumber(value: 2.2 * Double(scale)), NSNumber(value: 2.2 * Double(scale))]
             let bs = ChristmasDrawing.bulbSize(scale)
             let n = ValueNoise(seed: 7)
             for (i, b) in ChristmasDrawing.bulbs(width: size.width, scale: scale).enumerated() {
@@ -363,17 +410,33 @@ final class ChristmasNSView: NSView {
                     return l
                 }
                 let off = bulbLayer(lit: false), on = bulbLayer(lit: true)
-                // blødt, uafhængigt blink (forskellig takt og fase for hver pære); de fleste er tændt det meste af tiden
-                let dur = 1.8 + Double(n.hash(Int32(i), 1)) * 2.4
+                // Blødt, uafhængigt liv i hver pære: den ånder svagt det meste af tiden og dykker en enkelt gang
+                // (forskellig takt og fase for hver pære, så kæden glimter i stedet for at blinke i takt).
+                let dur = 3.2 + Double(n.hash(Int32(i), 1)) * 3.6
                 let twinkle = CAKeyframeAnimation(keyPath: "opacity")
-                twinkle.values = [1, 1, 0.15, 1]
-                twinkle.keyTimes = [0, 0.55, 0.75, 1]
+                twinkle.values = [1, 0.80, 1, 0.92, 0.22, 1]
+                twinkle.keyTimes = [0, 0.22, 0.44, 0.66, 0.80, 1]
                 twinkle.duration = dur
                 twinkle.repeatCount = .infinity
                 twinkle.calculationMode = .cubic
                 twinkle.timeOffset = Double(n.hash(Int32(i), 2)) * dur
+                twinkle.preferredFrameRateRange = CAFrameRateRange(minimum: 15, maximum: 60, preferred: 30)
                 glow.add(twinkle, forKey: "twinkle")
                 on.add(twinkle, forKey: "twinkle")
+                // Pærerne gynger ganske let i ledningen, hver i sin egen takt (som i et svagt træk).
+                let rest = Double(b.angle) * 0.5, swing = 0.05 + Double(n.hash(Int32(i), 3)) * 0.05
+                for l in [off, on] {
+                    let sway = CABasicAnimation(keyPath: "transform.rotation.z")
+                    sway.fromValue = rest - swing
+                    sway.toValue = rest + swing
+                    sway.duration = 2.2 + Double(n.hash(Int32(i), 4)) * 1.6
+                    sway.autoreverses = true
+                    sway.repeatCount = .infinity
+                    sway.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                    sway.timeOffset = Double(n.hash(Int32(i), 5)) * sway.duration
+                    sway.preferredFrameRateRange = CAFrameRateRange(minimum: 15, maximum: 60, preferred: 30)
+                    l.add(sway, forKey: "sway")
+                }
                 root.addSublayer(glow)
                 root.addSublayer(off)
                 root.addSublayer(on)

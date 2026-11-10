@@ -148,6 +148,9 @@ struct LyricsView: View {
 
     private var clock: LyricsClock { LyricsClock.shared }
 
+    /// Linjeskift: en blød fjeder (lander roligt, med et næsten usynligt efterslæb) i stedet for et fladt ryk.
+    static let lineChange = Animation.spring(response: 0.45, dampingFraction: 0.68)
+
     private var fontSize: CGFloat {
         switch size {
         case .small: 11 * scale
@@ -178,17 +181,18 @@ struct LyricsView: View {
                 } else {
                     lineView(idx.line, word: idx.word)
                         .id(idx.line ?? -1)
-                        .transition(.asymmetric(insertion: .offset(y: 8 * scale).combined(with: .opacity),
-                                                removal: .offset(y: -6 * scale).combined(with: .opacity)))
+                        .transition(.asymmetric(insertion: .offset(y: 18 * scale).combined(with: .opacity)
+                                                    .combined(with: .scale(scale: 0.9, anchor: .bottomLeading)),
+                                                removal: .offset(y: -14 * scale).combined(with: .opacity)))
                 }
             }
-            .animation(.easeOut(duration: 0.35), value: idx.line)
+            .animation(Self.lineChange, value: idx.line)
             if size != .small, let next = nextLine(after: idx.line) {
                 Text(next)
                     .font(.system(size: fontSize * 0.72, weight: .semibold))
                     .foregroundStyle(Color(nsColor: colors.secondary).opacity(0.75))
                     .lineLimit(1)
-                    .animation(.easeOut(duration: 0.35), value: idx.line)
+                    .animation(Self.lineChange, value: idx.line)
             }
         }
         .opacity(np.isPlaying ? 1 : 0.8)                                        // pause: står stille, svagt dæmpet

@@ -39,7 +39,8 @@ struct WidgetView: View {
     @Environment(\.turntableSnapshot) private var liveSnapshot
     /// Vinduet er synligt (ikke dækket). Tid, fremdrift og rulletekst kører kun når det er sandt (QA N9).
     private var windowVisible: Bool { WindowVisibility.shared.isVisible }
-    private var np: NowPlaying? { store.current }
+    /// Det, der vises: ved sangskift bliver det gamle cover liggende, til det nye er hentet (se `CoverHold`).
+    private var np: NowPlaying? { CoverHold.shared.resolve(store.current) }
     private var problem: SourceAccessProblem? { snapshotProblem ?? store.accessProblem }
     private var dim: Double { presentation.dimAmount }
 
@@ -53,7 +54,7 @@ struct WidgetView: View {
 
     private func turntable(_ size: CGSize, radius: CGFloat = Layout.objectRadius, deck: CGRect? = nil) -> some View {
         TurntableView(size: size, cornerRadius: radius, deck: deck, theme: settings.theme,
-                      flatColor: settings.flatColor, flatCustomHex: settings.flatCustomHex, nowPlaying: np, dim: dim,
+                      flatColor: settings.flatColor, flatCustomHex: settings.flatCustomHex, nowPlaying: CoverHold.shared.deck(store.current), dim: dim,
                       speed: settings.spinSpeed, scrubbing: ScrubState.shared.fraction != nil,
                       onArmClick: { store.playPause() }, onRecordClick: { store.openSourceApp() },
                       onSpeedClick: { settings.spinSpeed = $0 },
@@ -427,8 +428,10 @@ struct WidgetButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .opacity(configuration.isPressed ? 0.5 : 0.9)
-            .scaleEffect(configuration.isPressed ? 0.92 : 1)
-            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed ? 0.88 : 1)
+            // Ned: hurtigt. Op igen: en lille fjeder, så knappen føles trykket.
+            .animation(configuration.isPressed ? .easeOut(duration: 0.09) : .spring(response: 0.32, dampingFraction: 0.5),
+                       value: configuration.isPressed)
     }
 }
 

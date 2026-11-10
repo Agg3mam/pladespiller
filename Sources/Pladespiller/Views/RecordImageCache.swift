@@ -447,7 +447,7 @@ enum FlatRecordRenderer {
             } else if f >= fi {
                 let fine = n.value(r * sc * 0.7, 2.3) - 0.5                 // fine riller
                 let soft = n2.value(r * 0.07, 5.1) - 0.5                    // bløde bånd
-                l = 0.985 + 0.02 * fine + 0.04 * soft
+                l = 0.985 + 0.034 * fine + 0.04 * soft
                 for b in bands {
                     // bløde trin (som referencens tydelige ringe): lys linje med en svag skygge indenfor
                     let d = (f - b) * R
@@ -476,8 +476,9 @@ enum FlatRecordRenderer {
             ctx.saveGState()
             // skygge alene: figuren tegnes langt udenfor, skyggen forskydes tilbage
             let far: CGFloat = 4000
-            ctx.setShadow(offset: CGSize(width: far * scale, height: -g.h * 0.014 * scale), blur: g.h * 0.06 * scale,
-                          color: Drawing.gray(0, 0.26))
+            // lidt dybere end før (0,014 / 0,26), så pladen løfter sig fra kroppen uden at stilen bliver mindre flad
+            ctx.setShadow(offset: CGSize(width: (far + g.h * 0.006) * scale, height: -g.h * 0.022 * scale), blur: g.h * 0.07 * scale,
+                          color: Drawing.gray(0, 0.34))
             ctx.addPath(Drawing.circle(CGPoint(x: c.x - far, y: c.y), R)); ctx.setFillColor(Drawing.gray(0)); ctx.fillPath()
             ctx.restoreGState()
             ctx.setBlendMode(.clear)

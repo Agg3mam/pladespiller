@@ -176,6 +176,18 @@ Faldgruber, vi har mødt:
 4. **Menuen:** Farve ▸ og "Vælg farve…", der skal give fokus tilbage, når panelet lukkes. "Fjern widget".
 5. Spoling i **Musik** (Spotify er bekræftet live).
 
+**Animationer og look 2026-11-10** (grenen `polish/animationer-og-look`; ikke flettet ind i `main`, ikke udgivet):
+- **Coverskift:** det næste cover kan ikke hentes på forhånd (hverken Spotify eller Musik oplyser næste sang). `Views/CoverHold.swift` lader i stedet den gamle plade spille videre, til det nye cover er hentet (højst 2,5 s), og så sker hele pladeskiftet på én gang. Det nye cover vokser ud fra midten (`previousMask` i `TurntableLayer`). Slået fra i snapshots (`CoverHold.enabled`).
+- **Armens bevægelse:** blød landing med ét lille hop (`springLanding`, `hops`, `dropBounce` i `TurntableMotion`), også efter et slip. Brugeren fandt en kraftigere fjeder "for voldsom". `ArmDragTest` tillader nu den tilsigtede fjeder efter slip (`springRate`).
+- **Armens udseende (realistiske temaer):** grov, mat sort med korn (`roughBlack` i `Arm3D`), små dele i blankt metal. Brugeren valgte selv mat sort frem for metal og ville beholde den oprindelige buede form.
+- **Lysrefleksen** vugger ganske svagt, mens pladen drejer (3°, 20 s). Brugeren fandt både 10°/5 s og 10°/11 s for meget.
+- **Flad:** armen skifter farve, så den aldrig forsvinder mod kroppen (`readableArm`); lidt dybere skygge under pladen.
+- **Sangtekst og knapper:** fjedrende linjeskift og tryk.
+- **Julelamper:** større pærer med messingkrave og stjerneglimt, større glød, snoet ledning, blødere glimt og let gyngen.
+- Nyt flag: `--render-arm <fil.png>` tegner et nærbillede af den realistiske arm på få sekunder.
+- Brugeren kører temaet **Auto** i Stor, uden knapper og med sangtekst.
+- Live-tjekket i `--render-snapshots` melder 1 fejl ("sang 3 … synlig etiket = B, forventet C"). Den var der også før disse ændringer og er ikke undersøgt.
+
 **Fejlrettelser 2026-11-08** (efter "nederen bugs ved fullscreen"; ikke udgivet endnu):
 - Sangteksten på fuld skærm og i vinduet kunne gå ned. Det skete, når listen blev animeret forbi enden af en kortere tekst, så `ForEach`-intervallet blev tomt. Nu klemmes positionen, listen får `.id(trackKey)`, og urets linje tjekkes mod tekstens længde.
 - Fuld skærm lukkede, når skærmen gik i dvale (skærmen forsvandt fra `NSScreen.screens`). Nu huskes skærmen (`pladespiller.fullscreen.resumeScreen`). Fuld skærm åbner igen, når skærmen kommer tilbage, og også efter genstart. Kun Esc eller menuen glemmer den.

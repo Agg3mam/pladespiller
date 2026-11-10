@@ -23,6 +23,9 @@ final class TurntableLayer {
     private let labelLayer = CALayer()
     private let labelGray = CALayer()
     private let previousGroup = CALayer()
+    /// Coverskift: en ring, der bliver smallere udad, så det gamle cover forsvinder fra midten, og det nye vokser frem
+    /// fra pladens hul – som ringe på en plade.
+    private let previousMask = CAShapeLayer()
     private let previousLabelLayer = CALayer()
     private let previousLabelGray = CALayer()
     private let sheen = CALayer()
@@ -39,7 +42,7 @@ final class TurntableLayer {
     private var woodGeneration = -1
 
     private var allLayers: [CALayer] {
-        [container, root, plinth, plinthGray, speed33, speed45, platter, rotor, record, labelLayer, labelGray, previousGroup,
+        [container, root, plinth, plinthGray, speed33, speed45, platter, rotor, record, labelLayer, labelGray, previousGroup, previousMask,
          previousLabelLayer, previousLabelGray, sheen, ledGlow, shadowMove, shadowRot, shadowImage, armRot, armImage]
     }
 
@@ -66,6 +69,10 @@ final class TurntableLayer {
         rotor.addSublayer(labelLayer)
         rotor.addSublayer(labelGray)
         rotor.addSublayer(previousGroup)
+        previousMask.fillColor = nil
+        previousMask.strokeColor = CGColor(gray: 0, alpha: 1)
+        previousMask.actions = ["lineWidth": NSNull(), "path": NSNull(), "bounds": NSNull(), "position": NSNull()]
+        previousGroup.mask = previousMask
         previousGroup.addSublayer(previousLabelLayer)
         previousGroup.addSublayer(previousLabelGray)
         labelGray.opacity = 0
@@ -148,6 +155,10 @@ final class TurntableLayer {
             let labelFrame = CGRect(x: g.recordRadius - lr, y: g.recordRadius - lr, width: lr * 2, height: lr * 2)
             for l in [labelLayer, labelGray] { l.frame = labelFrame }
             previousGroup.frame = labelFrame
+            previousMask.frame = CGRect(origin: .zero, size: labelFrame.size)
+            // En cirkel langs etikettens kant: stregen dækker fra kanten og `lineWidth / 2` ind mod midten.
+            previousMask.path = CGPath(ellipseIn: previousMask.bounds, transform: nil)
+            previousMask.lineWidth = 0
             for l in [previousLabelLayer, previousLabelGray] { l.frame = CGRect(origin: .zero, size: labelFrame.size) }
 
             sheen.frame = square(g.center, half: g.recordRadius)
@@ -180,17 +191,22 @@ final class TurntableLayer {
 
     // MARK: Pose → lagværdier
 
-    private func armScale(_ lift: Double) -> Double { 1 + 0.045 * lift }
+    /// Hvor meget armen vokser, når den er løftet helt (den kommer nærmere øjet). Tydeligt, så løftet kan ses.
+    static let liftScale = 0.08
+    private func armScale(_ lift: Double) -> Double { 1 + Self.liftScale * lift }
     private func shadowOffset(_ lift: Double) -> CGPoint {
         guard let g = geometry else { return .zero }
         // Armen svæver over pladen: skyggen ligger tydeligt forskudt væk fra lyset (mindst 2,5/4 pt i små størrelser).
-        let dx = max(2.5, g.h * 0.014) + g.h * 0.030 * lift, dy = max(4, g.h * 0.022) + g.h * 0.045 * lift
+        let dx = max(2.5, g.h * 0.014) + g.h * 0.045 * lift, dy = max(4, g.h * 0.022) + g.h * 0.07 * lift
         let p = up(g.pivot)
         return CGPoint(x: p.x + dx, y: p.y - dy)
     }
     private func shadowOpacity(_ lift: Double) -> Double { (0.62 - 0.27 * lift) * ((style?.isFlat ?? false) ? 0.6 : 1) }
-    private func shadowScale(_ lift: Double) -> Double { 1 + 0.05 * lift }
+    private func shadowScale(_ lift: Double) -> Double { 1 + 0.09 * lift }
     private func rootOpacity(_ idle: Double) -> Double { 1 - 0.22 * idle }
+    /// Maskens stregbredde for en given overtoning (1 = det gamle cover dækker alt, 0 = det er væk): hullet i midten
+    /// vokser fra spindlen og ud til kanten.
+    private func irisWidth(_ fade: Double) -> Double { Double(geometry?.labelRadius ?? 0) * 2 * min(max(fade, 0), 1) }
     /// "Intet spiller" dæmper normalt hele kroppen. Fylder kroppen hele widgetten (kant til kant), dæmpes kun plade og arm,
     /// ellers ville widgettens flade skinne grumset igennem kroppen.
     private var idleTargets: [CALayer] {
@@ -250,6 +266,7 @@ final class TurntableLayer {
         shadowImage.opacity = Float(shadowOpacity(pose.armLift))
         shadowMove.position = shadowOffset(pose.armLift)
         previousGroup.opacity = Float(pose.previousLabelOpacity)
+        previousMask.lineWidth = irisWidth(pose.previousLabelOpacity)
         ledGlow.opacity = Float(pose.led)
         for l in [root, platter, rotor, sheen, armRot, shadowMove] { l.opacity = 1 }
         for l in idleTargets { l.opacity = Float(rootOpacity(pose.idle)) }
@@ -258,7 +275,7 @@ final class TurntableLayer {
     // MARK: Live-animation
 
     /// Nøglerne for de korte overgangsanimationer (løft, LED, etiket, tomgang).
-    static let transitionKeys: Set<String> = ["lift", "liftOpacity", "fade", "led", "idle"]
+    static let transitionKeys: Set<String> = ["lift", "liftOpacity", "fade", "fadeMask", "led", "idle"]
 
     /// QA N2 (sikkerhedsnet): når overgangene burde være færdige, fjernes de korte animationer, og lagene sættes
     /// til sluttilstanden. Så kan en overgang aldrig blive hængende på sin startværdi indtil næste hændelse.
@@ -275,6 +292,7 @@ final class TurntableLayer {
         shadowImage.opacity = Float(shadowOpacity(pose.armLift))
         shadowMove.position = shadowOffset(pose.armLift)
         previousGroup.opacity = Float(pose.previousLabelOpacity)
+        previousMask.lineWidth = irisWidth(pose.previousLabelOpacity)
         ledGlow.opacity = Float(pose.led)
         for l in [root, platter, rotor, sheen, armRot, shadowMove] { l.opacity = 1 }
         for l in idleTargets { l.opacity = Float(rootOpacity(pose.idle)) }
@@ -284,6 +302,8 @@ final class TurntableLayer {
     /// Når vinduet ikke er synligt: ingen animationer, og lagene viser SLUTtilstanden (ikke starten af en overgang).
     func applyFinal(_ animator: TurntableAnimator, at t: Double) {
         stopAnimations()
+        sheen.removeAnimation(forKey: "sway")
+        swaying = false
         var pose = animator.pose(at: animator.transitionsEnd(after: t))
         pose.recordAngle = animator.spin.angle(at: t)
         apply(pose)
@@ -293,11 +313,58 @@ final class TurntableLayer {
     func stopAnimations(keepSpin: Bool = false) {
         // Dæmpning og kroppens overtoning hører ikke til bevægelsen og må gerne løbe færdig.
         for l in allLayers {
-            for k in l.animationKeys() ?? [] where k != "dim" && k != "plinthFade" && k != "press" && !(keepSpin && k == "spin") {
+            for k in l.animationKeys() ?? [] where k != "dim" && k != "plinthFade" && k != "press" && k != "sway" && !(keepSpin && k == "spin") {
                 l.removeAnimation(forKey: k)
             }
         }
         if !keepSpin { laidSpin = nil }
+    }
+
+    // MARK: Levende lysrefleks
+    //
+    // Mens pladen drejer, vugger refleksen ganske svagt (en rigtig plade er aldrig helt plan, så lyset flytter sig lidt).
+    // Én uendelig animation i render-serveren; intet arbejde i appen. Stopper pladen, falder refleksen blødt til ro.
+
+    private var swaying = false
+    static let swayAngle = 0.055         // rad (ca. 3°)
+    static let swayPeriod = 20.0         // s frem og tilbage
+    /// Langsom bevægelse: lav billedrate er rigelig.
+    static let swayRange = CAFrameRateRange(minimum: 15, maximum: 60, preferred: 30)
+
+    private func setSheenSway(_ on: Bool) {
+        if on, swaying, sheen.animation(forKey: "sway") != nil { return }
+        if !on, !swaying { return }
+        swaying = on
+        let shown = (sheen.presentation() ?? sheen).value(forKeyPath: "transform.rotation.z") as? Double ?? 0
+        if on {
+            // Blødt ind fra der, hvor refleksen står, og derefter frem og tilbage for altid.
+            let lead = CABasicAnimation(keyPath: "transform.rotation.z")
+            lead.fromValue = shown
+            lead.toValue = Self.swayAngle
+            lead.duration = Self.swayPeriod / 4
+            lead.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            let loop = CABasicAnimation(keyPath: "transform.rotation.z")
+            loop.fromValue = Self.swayAngle
+            loop.toValue = -Self.swayAngle
+            loop.duration = Self.swayPeriod / 2
+            loop.autoreverses = true
+            loop.repeatCount = .infinity
+            loop.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            loop.beginTime = lead.duration
+            let group = CAAnimationGroup()
+            group.animations = [lead, loop]
+            group.duration = .greatestFiniteMagnitude
+            group.preferredFrameRateRange = Self.swayRange
+            sheen.add(group, forKey: "sway")
+        } else {
+            let rest = CABasicAnimation(keyPath: "transform.rotation.z")
+            rest.fromValue = shown
+            rest.toValue = 0
+            rest.duration = 1.4
+            rest.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            rest.preferredFrameRateRange = Self.swayRange
+            sheen.add(rest, forKey: "sway")      // erstatter den uendelige; modelværdien er 0
+        }
     }
 
     /// Den omdrejning, der ligger som animation nu. Er den uændret, får den lov at køre videre (helt uden hak).
@@ -348,7 +415,7 @@ final class TurntableLayer {
     /// Armens løft som det ses lige nu (0 = nede).
     func visibleArmLift() -> Double {
         let v = (armImage.presentation() ?? armImage).value(forKeyPath: "transform.scale") as? Double ?? 1
-        return max(0, (v - 1) / 0.045)
+        return max(0, (v - 1) / Self.liftScale)
     }
 
     /// Armens vinkel som den ses lige nu (præsentationslaget), til klik på armen.
@@ -404,8 +471,10 @@ final class TurntableLayer {
         keyframes(shadowImage, "opacity", dense, densePoses.map { shadowOpacity($0.armLift) }, key: "liftOpacity", from: start)
         keyframes(shadowMove, "position", dense, densePoses.map { NSValue(point: shadowOffset($0.armLift)) }, key: "lift", from: start)
         keyframes(previousGroup, "opacity", dense, densePoses.map(\.previousLabelOpacity), key: "fade", from: start)
+        keyframes(previousMask, "lineWidth", dense, densePoses.map { irisWidth($0.previousLabelOpacity) }, key: "fadeMask", from: start)
         keyframes(ledGlow, "opacity", dense, densePoses.map(\.led), key: "led", from: start)
         for l in idleTargets { keyframes(l, "opacity", dense, densePoses.map { rootOpacity($0.idle) }, key: "idle", from: start) }
+        setSheenSway(spin.targetVelocity > 0)
         beforeSpin()
 
         // Rotor: rampe (keyframes af den integrerede vinkel) + evt. uendelig jævn omdrejning bagefter – samlet i én

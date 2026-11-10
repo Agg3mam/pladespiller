@@ -80,11 +80,19 @@ enum Arm3D {
         let scene = SCNScene()
         scene.background.contents = NSColor.clear
         scene.lightingEnvironment.contents = studio
-        scene.lightingEnvironment.intensity = 1.5
+        scene.lightingEnvironment.intensity = 0.85
         // Hovedlys fra øverst til venstre (samme retning som refleksen på pladen)
         let key = SCNLight()
         key.type = .directional
-        key.intensity = 650
+        key.intensity = 1500
+        // Delene skygger for hinanden (åget på huset, pickuphovedet på pickuppen): det giver dybde.
+        key.castsShadow = true
+        key.shadowMode = .forward
+        key.shadowRadius = 4
+        key.shadowSampleCount = 16
+        key.shadowColor = NSColor(white: 0, alpha: 0.55)
+        key.shadowMapSize = CGSize(width: 2048, height: 2048)
+        key.automaticallyAdjustsShadowProjection = true
         let keyNode = SCNNode()
         keyNode.light = key
         keyNode.eulerAngles = SCNVector3(-1.0, -0.65, 0)
@@ -110,18 +118,38 @@ enum Arm3D {
         let w = 1024, h = 512
         guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: Drawing.colorSpace,
                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        // himmel → gulv (CG: y opad, så toppen af billedet er "op")
-        let sky = Drawing.gradient([(0, Drawing.gray(0.04)), (0.45, Drawing.gray(0.16)), (0.62, Drawing.gray(0.42)), (1, Drawing.gray(0.62))])
-        ctx.drawLinearGradient(sky, start: CGPoint(x: 0, y: 0), end: CGPoint(x: 0, y: CGFloat(h)), options: [])
-        func softbox(_ r: CGRect, _ v: CGFloat) {
-            ctx.setFillColor(Drawing.gray(v))
-            ctx.addPath(CGPath(roundedRect: r, cornerWidth: r.height * 0.3, cornerHeight: r.height * 0.3, transform: nil))
-            ctx.fillPath()
+        // Et rum set fra armen: lyst loft med store lamper, vægge fra kølig til varm, og forneden det varme træ og den
+        // sorte plade, som metallet spejler nedad. (CG: y opad, så toppen af billedet er "op".)
+        let room = Drawing.gradient([(0, Drawing.color(0.05, 0.03, 0.02)), (0.30, Drawing.color(0.13, 0.08, 0.05)),
+                                     (0.50, Drawing.color(0.07, 0.07, 0.07)), (0.64, Drawing.color(0.16, 0.17, 0.19)),
+                                     (0.80, Drawing.color(0.44, 0.46, 0.50)), (1, Drawing.color(0.66, 0.68, 0.72))])
+        // (mørkt bånd i horisonten: rørets sider spejler det og bliver mørke, så røret ser rundt ud og ikke fladt)
+        ctx.drawLinearGradient(room, start: CGPoint(x: 0, y: 0), end: CGPoint(x: 0, y: CGFloat(h)), options: [])
+        // en varm side (lampe/aftenlys) og en kølig side, så metallet får farve i stedet for ren grå
+        let warm = Drawing.gradient([(0, Drawing.color(1.0, 0.80, 0.56, 0.42)), (1, Drawing.color(1.0, 0.80, 0.56, 0))])
+        ctx.drawRadialGradient(warm, startCenter: CGPoint(x: 760, y: 330), startRadius: 0, endCenter: CGPoint(x: 760, y: 330),
+                               endRadius: 260, options: [])
+        let cool = Drawing.gradient([(0, Drawing.color(0.68, 0.80, 1.0, 0.32)), (1, Drawing.color(0.68, 0.80, 1.0, 0))])
+        ctx.drawRadialGradient(cool, startCenter: CGPoint(x: 220, y: 300), startRadius: 0, endCenter: CGPoint(x: 220, y: 300),
+                               endRadius: 300, options: [])
+        func softbox(_ r: CGRect, _ v: CGFloat, warmth: CGFloat = 0) {
+            // blød kant: lampen tones ud i stedet for at stå som et skarpt hvidt rektangel i spejlingen
+            for (k, a) in [(1.5, 0.10), (1.25, 0.22), (1.0, 1.0)] as [(CGFloat, CGFloat)] {
+                let rr = r.insetBy(dx: -r.width * (k - 1) / 2, dy: -r.height * (k - 1) / 2)
+                ctx.setFillColor(Drawing.color(v, v * (1 - 0.06 * warmth), v * (1 - 0.16 * warmth), a))
+                ctx.addPath(CGPath(roundedRect: rr, cornerWidth: rr.height * 0.3, cornerHeight: rr.height * 0.3, transform: nil))
+                ctx.fillPath()
+            }
         }
-        softbox(CGRect(x: 90, y: 360, width: 260, height: 110), 1.0)
-        softbox(CGRect(x: 380, y: 400, width: 150, height: 70), 0.85)
-        softbox(CGRect(x: 690, y: 300, width: 40, height: 170), 0.95)
-        softbox(CGRect(x: 880, y: 330, width: 90, height: 60), 0.55)
+        softbox(CGRect(x: 90, y: 372, width: 250, height: 96), 1.0)                 // hovedlys, øverst til venstre
+        softbox(CGRect(x: 392, y: 412, width: 130, height: 54), 0.80)
+        softbox(CGRect(x: 694, y: 318, width: 34, height: 150), 0.95, warmth: 1)    // smal, varm stribe til højre
+        softbox(CGRect(x: 884, y: 342, width: 84, height: 50), 0.50, warmth: 0.6)
+        // vinduessprosser: tynde mørke streger hen over hovedlyset giver refleksen form (små brud i lysstriben)
+        ctx.setFillColor(Drawing.gray(0.05, 0.85))
+        ctx.fill(CGRect(x: 170, y: 372, width: 5, height: 96))
+        ctx.fill(CGRect(x: 256, y: 372, width: 5, height: 96))
+        ctx.fill(CGRect(x: 90, y: 417, width: 250, height: 4))
         return ctx.makeImage()
     }
 
@@ -134,10 +162,105 @@ enum Arm3D {
         m.isDoubleSided = true
         return m
     }
-    private static var aluminium: SCNMaterial { material(NSColor(white: 0.88, alpha: 1), rough: 0.24, metal: 1) }
-    private static var brushed: SCNMaterial { material(NSColor(white: 0.84, alpha: 1), rough: 0.34, metal: 1) }
+    // Metallet har struktur: rigtigt aluminium er aldrig helt ens. Et ruhedskort med fine striber (trukket rør på langs,
+    // drejede emner rundt om) bryder refleksen op i lange, levende lysstriber i stedet for en jævn, plastikagtig grå.
+
+    private enum Grain { case along, around }
+    private static var grainCache: [String: CGImage] = [:]
+    /// Ruhedskort: `base` ± `amount`, som striber. `.along` = striber langs røret, `.around` = ringe om et drejet emne.
+    private static func grain(_ dir: Grain, base: Float, amount: Float) -> CGImage? {
+        let key = "\(dir)|\(base)|\(amount)"
+        if let hit = grainCache[key] { return hit }
+        let fine = ValueNoise(seed: 11), mid = ValueNoise(seed: 47), spots = ValueNoise(seed: 73)
+        let img = Drawing.pixels(size: CGSize(width: 512, height: 512), scale: 1) { x, y in
+            let across = dir == .along ? x : y, with = dir == .along ? y : x
+            var r = base
+            r += (fine.value(across * 1.9, with * 0.02) - 0.5) * amount * 1.4          // fine ridser
+            r += (mid.value(across * 0.22, with * 0.012) - 0.5) * amount               // brede bånd
+            r += max(0, spots.value(x * 0.05, y * 0.05) - 0.72) * amount * 1.6         // enkelte matte pletter (fingre, støv)
+            let v = min(max(r, 0.03), 1)
+            return SIMD4(v, v, v, 1)
+        }
+        grainCache[key] = img
+        return img
+    }
+
+    private static func metal(_ color: NSColor, rough: Float, grain dir: Grain, amount: Float) -> SCNMaterial {
+        let m = material(color, rough: CGFloat(rough), metal: 1)
+        if let map = grain(dir, base: rough, amount: amount) {
+            m.roughness.contents = map
+            m.roughness.wrapS = .repeat
+            m.roughness.wrapT = .repeat
+            m.roughness.mipFilter = .linear
+        }
+        return m
+    }
+
+    // Grov, mat sort (som pulverlak eller støbt, sortmalet metal): ingen spejling, men overfladen er ru, så lyset
+    // lægger sig som et bredt, kornet skær hen over den. Kornet er et lille mønster, der gentages uden søm.
+
+    private static var gritCache: (rough: CGImage, normal: CGImage)?
+    private static var grit: (rough: CGImage, normal: CGImage)? {
+        if let gritCache { return gritCache }
+        let n = ValueNoise(seed: 131)
+        /// Blød støj, der gentager sig efter `cells` felter (så mønstret kan lægges side om side uden kant).
+        func periodic(_ x: Float, _ y: Float, cells: Int32, salt: Int32) -> Float {
+            let xi = Int32(x.rounded(.down)), yi = Int32(y.rounded(.down))
+            let fx = x - Float(xi), fy = y - Float(yi)
+            let sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy)
+            func v(_ i: Int32, _ j: Int32) -> Float { n.hash(((i % cells) + cells) % cells &+ salt, ((j % cells) + cells) % cells &+ salt &* 7) }
+            let a = v(xi, yi), b = v(xi + 1, yi), c = v(xi, yi + 1), d = v(xi + 1, yi + 1)
+            return (a + (b - a) * sx) + ((c + (d - c) * sx) - (a + (b - a) * sx)) * sy
+        }
+        let side: Float = 256
+        func height(_ x: Float, _ y: Float) -> Float {
+            0.6 * periodic(x / side * 80, y / side * 80, cells: 80, salt: 3)
+                + 0.4 * periodic(x / side * 26, y / side * 26, cells: 26, salt: 91)
+        }
+        let size = CGSize(width: CGFloat(side), height: CGFloat(side))
+        guard let rough = Drawing.pixels(size: size, scale: 1, { x, y in
+            let v = 0.50 + 0.30 * height(x, y)
+            return SIMD4(v, v, v, 1)
+        }), let normal = Drawing.pixels(size: size, scale: 1, { x, y in
+            let k: Float = 2.6
+            let dx = (height(x + 1, y) - height(x - 1, y)) * k, dy = (height(x, y + 1) - height(x, y - 1)) * k
+            let l = (dx * dx + dy * dy + 1).squareRoot()
+            return SIMD4(-dx / l * 0.5 + 0.5, -dy / l * 0.5 + 0.5, 1 / l * 0.5 + 0.5, 1)
+        }) else { return nil }
+        gritCache = (rough, normal)
+        return gritCache
+    }
+
+    /// `tile`: hvor mange gange kornet gentages rundt om / langs emnet (så kornene er lige store på alle dele).
+    private static func roughBlack(tile: (CGFloat, CGFloat)) -> SCNMaterial {
+        let m = material(NSColor(white: 0.085, alpha: 1), rough: 0.6, metal: 0)   // lidt lysere end pladen, så armen kan ses hen over den
+        guard let grit else { return m }
+        m.roughness.contents = grit.rough
+        m.normal.contents = grit.normal
+        m.normal.intensity = 1.0
+        for p in [m.roughness, m.normal] {
+            p.wrapS = .repeat
+            p.wrapT = .repeat
+            p.mipFilter = .linear
+            p.contentsTransform = SCNMatrix4MakeScale(tile.0, tile.1, 1)
+        }
+        return m
+    }
+
+    /// Kardanhus og ring: satineret aluminium med en svagt kølig tone.
+    private static var aluminium: SCNMaterial {
+        metal(NSColor(srgbRed: 0.86, green: 0.87, blue: 0.89, alpha: 1), rough: 0.26, grain: .around, amount: 0.16)
+    }
+    /// Armrøret: trukket, poleret aluminium – blankt, med fine striber på langs.
+    private static var tube: SCNMaterial {
+        metal(NSColor(srgbRed: 0.90, green: 0.91, blue: 0.92, alpha: 1), rough: 0.15, grain: .along, amount: 0.13)
+    }
+    /// Modvægt og pickuphoved: børstet, tydelige ringe/striber.
+    private static var brushed: SCNMaterial {
+        metal(NSColor(srgbRed: 0.80, green: 0.81, blue: 0.83, alpha: 1), rough: 0.36, grain: .around, amount: 0.26)
+    }
     private static var chrome: SCNMaterial { material(NSColor(white: 0.96, alpha: 1), rough: 0.07, metal: 1) }
-    private static var anodizedBlack: SCNMaterial { material(NSColor(white: 0.03, alpha: 1), rough: 0.5, metal: 0.18) }
+    private static var anodizedBlack: SCNMaterial { material(NSColor(white: 0.035, alpha: 1), rough: 0.42, metal: 0.3) }
     private static var plasticBlack: SCNMaterial { material(NSColor(white: 0.05, alpha: 1), rough: 0.5, metal: 0) }
     private static var cartridgeRed: SCNMaterial {
         material(NSColor(srgbRed: 0.78, green: 0.19, blue: 0.14, alpha: 1), rough: 0.38, metal: 0)
@@ -150,7 +273,7 @@ enum Arm3D {
     /// Drejet emne: profilen (radius, højde) drejes om y-aksen. Glatte normaler langs profilen.
     /// Profilen skal gå nedefra og op (bund → side → låg), så normalerne vender udad.
     private static func lathe(_ profile: [(r: CGFloat, y: CGFloat)], segments: Int = 72, _ m: SCNMaterial) -> SCNNode {
-        var verts: [SCNVector3] = [], normals: [SCNVector3] = [], idx: [Int32] = []
+        var verts: [SCNVector3] = [], normals: [SCNVector3] = [], uvs: [CGPoint] = [], idx: [Int32] = []
         let n = profile.count
         for (i, p) in profile.enumerated() {
             // normal i profilplanet: vinkelret på tangenten (gennemsnit af naboerne)
@@ -162,6 +285,7 @@ enum Arm3D {
                 let phi = CGFloat(s) / CGFloat(segments) * 2 * .pi
                 verts.append(SCNVector3(p.r * cos(phi), p.y, p.r * sin(phi)))
                 normals.append(SCNVector3(nr * cos(phi), ny, nr * sin(phi)))
+                uvs.append(CGPoint(x: CGFloat(s) / CGFloat(segments), y: CGFloat(i) / CGFloat(max(1, n - 1))))
             }
         }
         let ring = segments + 1
@@ -171,7 +295,8 @@ enum Arm3D {
                 idx += [a, c, b, b, c, d]
             }
         }
-        let geo = SCNGeometry(sources: [SCNGeometrySource(vertices: verts), SCNGeometrySource(normals: normals)],
+        let geo = SCNGeometry(sources: [SCNGeometrySource(vertices: verts), SCNGeometrySource(normals: normals),
+                                        SCNGeometrySource(textureCoordinates: uvs)],
                               elements: [SCNGeometryElement(indices: idx, primitiveType: .triangles)])
         geo.materials = [m]
         let node = SCNNode(geometry: geo)
@@ -192,7 +317,7 @@ enum Arm3D {
 
     /// Rør langs en kurve i xz-planet (glat, 24 sider), i højden `y`.
     private static func sweep(_ pts: [CGPoint], radius: CGFloat, y: CGFloat, _ m: SCNMaterial) -> SCNNode {
-        var verts: [SCNVector3] = [], normals: [SCNVector3] = [], idx: [Int32] = []
+        var verts: [SCNVector3] = [], normals: [SCNVector3] = [], uvs: [CGPoint] = [], idx: [Int32] = []
         let sides = 24
         for (i, p) in pts.enumerated() {
             let a = pts[max(0, i - 1)], b = pts[min(pts.count - 1, i + 1)]
@@ -204,6 +329,7 @@ enum Arm3D {
                 let ny = cos(phi), ns = sin(phi)
                 normals.append(SCNVector3(sx * ns, ny, sz * ns))
                 verts.append(SCNVector3(p.x + sx * ns * radius, y + ny * radius, p.y + sz * ns * radius))
+                uvs.append(CGPoint(x: CGFloat(s) / CGFloat(sides), y: CGFloat(i) / CGFloat(max(1, pts.count - 1))))
             }
         }
         let ring = sides + 1
@@ -213,7 +339,8 @@ enum Arm3D {
                 idx += [a, b, c, b, d, c]
             }
         }
-        let geo = SCNGeometry(sources: [SCNGeometrySource(vertices: verts), SCNGeometrySource(normals: normals)],
+        let geo = SCNGeometry(sources: [SCNGeometrySource(vertices: verts), SCNGeometrySource(normals: normals),
+                                        SCNGeometrySource(textureCoordinates: uvs)],
                               elements: [SCNGeometryElement(indices: idx, primitiveType: .triangles)])
         geo.materials = [m]
         let node = SCNNode(geometry: geo)
@@ -249,7 +376,7 @@ enum Arm3D {
             return CGPoint(x: u * u * u * p0.x + 3 * u * u * t * p1.x + 3 * u * t * t * p2.x + t * t * t * p3.x,
                            y: u * u * u * p0.y + 3 * u * u * t * p1.y + 3 * u * t * t * p2.y + t * t * t * p3.y)
         }
-        arm.addChildNode(sweep(curve, radius: tubeR, y: y0, aluminium))
+        arm.addChildNode(sweep(curve, radius: tubeR, y: y0, roughBlack(tile: (1, 9))))
         // bagerste stump
         arm.addChildNode(sweep([CGPoint(x: g.counterweightEnd + h * 0.006, y: 0), CGPoint(x: 0, y: 0)], radius: tubeR * 0.85, y: y0, chrome))
 
@@ -262,7 +389,7 @@ enum Arm3D {
             cw.append((cwR, y)); cw.append((cwR * 0.955, y + pitch * 0.5)); y += pitch
         }
         cw += [(cwR, knurlEnd + pitch * 0.5), (cwR, cwL - cwR * 0.1), (cwR * 0.9, cwL), (0, cwL)]
-        arm.addChildNode(alongX(lathe(cw, brushed), x: g.counterweightEnd, y: y0))
+        arm.addChildNode(alongX(lathe(cw, roughBlack(tile: (4, 2))), x: g.counterweightEnd, y: y0))
         // nåletryksskive (sort) med hvide streger og rødt nulpunkt
         let dw = h * 0.016
         arm.addChildNode(alongX(lathe(disc(r: cwR * 1.04, height: dw, bevel: dw * 0.3), anodizedBlack),
@@ -278,16 +405,16 @@ enum Arm3D {
 
         // Kardanleje: sølvhus med afrundet kant, krom hætte med en lille kuppel, åg med to tapper på tværs
         let b = g.bearingRadius
-        let housing = lathe(disc(r: b, height: y0 + b * 0.35, bevel: b * 0.25), aluminium)
+        let housing = lathe(disc(r: b, height: y0 + b * 0.35, bevel: b * 0.25), roughBlack(tile: (5, 2)))
         arm.addChildNode(housing)
         var cap = disc(r: b * 0.55, height: y0 + b * 0.55, bevel: b * 0.2)
         cap.append((0, y0 + b * 0.62))     // lille kuppel
         arm.addChildNode(lathe(cap, chrome))
         // åg: en rund tværstang over huset, båret af to små stolper ude ved kanten
         arm.addChildNode(sweep([CGPoint(x: 0, y: -(b + h * 0.008)), CGPoint(x: 0, y: b + h * 0.008)], radius: h * 0.0065,
-                               y: y0 + b * 0.25, brushed))
+                               y: y0 + b * 0.25, roughBlack(tile: (1, 3))))
         for side in [-1.0, 1.0] as [CGFloat] {
-            let post = lathe(disc(r: h * 0.009, height: y0 + b * 0.3, bevel: h * 0.003), aluminium)
+            let post = lathe(disc(r: h * 0.009, height: y0 + b * 0.3, bevel: h * 0.003), roughBlack(tile: (2, 2)))
             post.position = SCNVector3(0, 0, side * (b + h * 0.004))
             arm.addChildNode(post)
         }
@@ -321,7 +448,7 @@ enum Arm3D {
         plate.flatness = 0.05
         let shell = SCNShape(path: plate, extrusionDepth: h * 0.007)
         shell.chamferRadius = h * 0.0022
-        shell.materials = [anodizedBlack]
+        shell.materials = [roughBlack(tile: (2.2, 2.2))]
         let shellNode = SCNNode(geometry: shell)
         shellNode.eulerAngles = SCNVector3(CGFloat.pi / 2, 0, 0)        // xy-profilen ned i xz-planet (y → z)
         shellNode.position = SCNVector3(0, h * 0.002, 0)

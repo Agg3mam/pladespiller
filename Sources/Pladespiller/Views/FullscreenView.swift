@@ -29,7 +29,8 @@ struct FullscreenView: View {
     /// Vinduets egen synlighed (fuld skærm eller "Åbn som vindue", aldrig widgettens).
     var visibility: WindowVisibility = .fullscreen
 
-    private var np: NowPlaying? { store.current }
+    /// Det, der vises: ved sangskift bliver det gamle cover liggende, til det nye er hentet (se `CoverHold`).
+    private var np: NowPlaying? { CoverHold.shared.resolve(store.current) }
     private var lyrics: LyricsState { snapshotLyrics ?? store.lyrics }
     private var problem: SourceAccessProblem? { snapshotProblem ?? store.accessProblem }
     private var style: TurntableStyle {
@@ -77,7 +78,7 @@ struct FullscreenView: View {
 
     private func turntable(_ size: CGSize, deck: CGRect) -> some View {
         TurntableView(size: size, cornerRadius: 0, deck: deck, theme: settings.theme,
-                      flatColor: settings.flatColor, flatCustomHex: settings.flatCustomHex, nowPlaying: np, dim: 0,
+                      flatColor: settings.flatColor, flatCustomHex: settings.flatCustomHex, nowPlaying: CoverHold.shared.deck(store.current), dim: 0,
                       speed: settings.spinSpeed, scrubbing: false, deckDetails: true,
                       onArmClick: { store.playPause() }, onRecordClick: { store.openSourceApp() },
                       onSpeedClick: { settings.spinSpeed = $0 },
@@ -255,7 +256,7 @@ struct FullscreenLyrics: View {
         }()
         LyricsStack(position: position, current: idx.line, word: idx.word, lyrics: lyrics, fontSize: unit * 76,
                     width: width, colors: colors)
-            .animation(.easeOut(duration: 0.5), value: idx.line)
+            .animation(.spring(response: 0.6, dampingFraction: 0.72), value: idx.line)
             .task(id: "\(np.trackKey)|\(np.isPlaying)|\(np.position)|\(np.positionTimestamp.timeIntervalSinceReferenceDate)|\(windowVisible)") {
                 guard snapshot == nil, windowVisible else { return }
                 await clock.run(np: np, lyrics: lyrics)

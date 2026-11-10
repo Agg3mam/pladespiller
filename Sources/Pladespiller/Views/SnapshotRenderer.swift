@@ -47,6 +47,7 @@ enum SnapshotRenderer {
     }
 
     static func run(outputDirectory dir: URL) {
+        CoverHold.enabled = false        // hver visning tegnes præcis som dens data siger
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { UserDefaults.standard.removePersistentDomain(forName: defaultsSuite) }
         let started = Date()

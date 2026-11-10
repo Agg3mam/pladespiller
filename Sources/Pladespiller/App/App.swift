@@ -11,6 +11,7 @@ import SwiftUI
 ///   --lyrics "Titel" "Kunstner" [sek]  hent sangtekst fra LRCLIB og print den
 ///   --unregister-login-item   meld "Åbn ved login" fra og afslut (scripts/uninstall.sh)
 ///   --window-selftest [dir]   tjek gitter/placering og tegn skallen til PNG (Vindue-agenten)
+///   --render-arm <fil.png>    tegn et nærbillede af den realistiske arm og afslut
 ///   --arm-test [dir]          grib/træk i armen med syntetiske musehændelser og mål animationen (Grafik-agenten)
 @main
 enum PladespillerMain {
@@ -25,6 +26,19 @@ enum PladespillerMain {
         if let i = args.firstIndex(of: "--render-snapshots") {
             let dir = args.indices.contains(i + 1) ? args[i + 1] : "snapshots"
             SnapshotRenderer.run(outputDirectory: URL(fileURLWithPath: dir))
+            exit(0)
+        }
+        if let i = args.firstIndex(of: "--render-arm"), args.indices.contains(i + 1) {
+            // Nærbillede af den realistiske arm (stor widget, træ, 4x) – hurtigt at se på, når armens model ændres.
+            let g = TurntableGeometry(size: CGSize(width: 344, height: 344), cornerRadius: 28, deck: nil, flat: false)
+            var pose = TurntablePose()
+            pose.armAngle = Double(g.armAngle(forProgress: 0.45))
+            pose.idle = 0
+            let style = TurntableStyle.make(theme: .wood, artwork: nil)
+            if let cg = TurntableLayer.snapshot(g, style: style, scale: 4, pose: pose) {
+                let rep = NSBitmapImageRep(cgImage: cg)
+                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: args[i + 1]))
+            }
             exit(0)
         }
         if let i = args.firstIndex(of: "--arm-test") {

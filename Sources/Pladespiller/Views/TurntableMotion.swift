@@ -171,7 +171,7 @@ struct TurntableAnimator {
     func with(geometry g: TurntableGeometry) -> TurntableAnimator {
         var copy = TurntableAnimator(geometry: g)
         copy.spin = spin; copy.input = input; copy.inputTime = inputTime
-        copy.armTarget = armTarget; copy.armTransition = armTransition; copy.armCorrections = armCorrections
+        copy.armTarget = armTarget; copy.armTransition = armTransition; copy.armCorrections = armCorrections; copy.dropSpring = dropSpring
         copy.label = label; copy.previousLabel = previousLabel; copy.labelFade = labelFade
         copy.led = led; copy.idle = idle; copy.started = started
         copy.cruiseVelocity = cruiseVelocity; copy.fortyFive = fortyFive
@@ -246,7 +246,7 @@ struct TurntableAnimator {
             previousLabel = currentPose.previousLabelOpacity > 0.5 ? currentPose.previousLabel : label
             label = newLabel
             labelFade = Fade(1)
-            labelFade.set(0, at: t, duration: D * 0.5, delay: D * 0.15)
+            labelFade.set(0, at: t, duration: D * 0.7, delay: D * 0.12)
         }
 
         let armNeedsMove = newArmTarget != armTarget || (trackChanged && newArmTarget == .groove) || seek
@@ -261,12 +261,15 @@ struct TurntableAnimator {
             // Glid fra den nuværende vinkel til den nye uden løft.
             armTransition = (t, Self.glideDuration, currentPose.armAngle, currentPose.armLift, 0, true)
             armCorrections = []
+            dropSpring = false
         } else if armNeedsMove {
             // Løft lidt ved pause/afspil, lidt mere ved ny sang.
             let lift: Double = trackChanged || seek ? 1.0 : 0.8
-            let dur = seek ? D * 0.7 : D
+            // Selve flytningen er færdig på under 1 s; resten er nålen, der fjedrer til ro.
+            let dur = (seek ? D * 0.7 : D) * Self.springStretch
             armTransition = (t, dur, currentPose.armAngle, currentPose.armLift, lift, false)
             armCorrections = []
+            dropSpring = false
         }
         armTarget = newArmTarget
         return true
@@ -277,8 +280,25 @@ struct TurntableAnimator {
     mutating func dropArm(from angle: Double, lift: Double, at t: Double) {
         armTransition = (t, Self.dropDuration, angle, lift, 0, true)
         armCorrections = []
+        dropSpring = true
     }
-    static let dropDuration = 0.35
+    /// Slip: armen glider på plads og sænkes på `dropMove` (som før), og fjedrer derefter til ro i `dropTail`.
+    static let dropMove = 0.35
+    static let dropTail = 0.4
+    static let dropDuration = dropMove + dropTail
+    /// Hvor højt nålen hopper efter et slip (i løft, 0...1).
+    static let dropBounce = 0.12
+    /// Armen er sluppet fra hånden og fjedrer til sidst (kun det glid, `dropArm` har startet).
+    private var dropSpring = false
+
+    /// Nålens hop efter landingen (v = 0...1 gennem halen): to hop, det andet meget lavere.
+    static func hops(_ v: Double) -> Double {
+        guard v > 0, v < 1 else { return 0 }
+        let wave = sin(.pi * 1.5 * v)
+        return exp(-2.6 * v) * wave * wave * (1 - v * v * v)
+    }
+    /// Hvor meget længere en arm-bevægelse varer, fordi den slutter med at fjedre.
+    static let springStretch = 1.3
 
     /// Tidspunktet hvor alle korte overgange er færdige.
     func transitionsEnd(after t: Double) -> Double {
@@ -301,11 +321,14 @@ struct TurntableAnimator {
                               at t: Double) -> Double {
         let s = (t - tr.start) / tr.duration
         if s >= 1 { return 1 }
-        if tr.glide { return easeInOut(s) }
-        if s < 0.22 { return 0 }
-        if s < 0.78 { return easeInOut((s - 0.22) / 0.56) }
+        if tr.glide { return easeInOut(min(1, s / glideMove)) }
+        if s < 0.12 { return 0 }
+        if s < 0.46 { return Self.swing((s - 0.12) / 0.34) }
         return 1
     }
+
+    /// Den del af et glid, hvor armen flytter sig og sænkes (resten er fjederen efter et slip).
+    private var glideMove: Double { dropSpring ? Self.dropMove / Self.dropDuration : 1 }
 
     /// Summen af de rettelser, der stadig tones ud.
     private func correction(at t: Double) -> Double {
@@ -313,6 +336,26 @@ struct TurntableAnimator {
             let s = (t - c.start) / Self.glideDuration
             return s >= 1 ? sum : sum + c.amount * (1 - easeInOut(s))
         }
+    }
+
+    /// Armen sænkes og fjedrer: 1 → 0. Den falder blødt ned til pladen (ved `touch`), og så giver armens ophæng efter:
+    /// nålen hopper et par gange op igen, hver gang lavere, før den ligger stille – som på en rigtig pladespiller.
+    /// Værdien er sammenhængende, og farten er nul i begge ender (intet ryk).
+    static func springLanding(_ u: Double, touch: Double = 0.55, bounce: Double = 0.14) -> Double {
+        let u = min(max(u, 0), 1)
+        if u < touch { return 1 - easeInOut(pow(u / touch, 0.8)) }
+        let v = (u - touch) / (1 - touch)                  // 0...1 efter at nålen har ramt
+        let hops = 1.5                                     // ét lille hop og et næsten usynligt efterslæb
+        let wave = sin(.pi * hops * v)
+        return bounce * exp(-3.2 * v) * wave * wave * (1 - v * v * v)
+    }
+
+    /// Armens vej hen over pladen (0 → 1): den svinger en anelse for langt og falder tilbage (den har vægt).
+    static func swing(_ s: Double) -> Double {
+        let t = min(max(s, 0), 1)
+        let over = 0.012, turn = 0.78
+        if t < turn { return (1 + over) * easeInOut(t / turn) }
+        return 1 + over * (1 - easeInOut((t - turn) / (1 - turn)))
     }
 
     func pose(at t: Double) -> TurntablePose {
@@ -337,17 +380,19 @@ struct TurntableAnimator {
             let s = (t - tr.start) / tr.duration
             if tr.glide {
                 // Glid: armen flyttes straks og blødt; et evt. løft fra før sænkes samtidig.
-                let e = easeInOut(s)
+                let e = easeInOut(min(1, s / glideMove))
                 p.armAngle = tr.fromAngle + (target - tr.fromAngle) * e
                 p.armLift = tr.fromLift * (1 - e)
+                // Sluppet fra hånden: når armen er nede, fjedrer nålen et par gange, før den ligger stille.
+                if dropSpring, s > glideMove { p.armLift = Self.dropBounce * Self.hops((s - glideMove) / (1 - glideMove)) }
                 return p
             }
-            // løft 0–28 %, flyt 22–78 %, sænk 72–100 %
-            if s < 0.28 { p.armLift = tr.fromLift + (tr.lift - tr.fromLift) * easeInOut(s / 0.28) }
-            else if s < 0.72 { p.armLift = tr.lift }
-            else { p.armLift = tr.lift * (1 - easeInOut((s - 0.72) / 0.28)) }
-            if s < 0.22 { p.armAngle = tr.fromAngle }
-            else if s < 0.78 { p.armAngle = tr.fromAngle + (target - tr.fromAngle) * easeInOut((s - 0.22) / 0.56) }
+            // løft 0–15 %, flyt 12–46 %, sænk og fjedr 40–100 %
+            if s < 0.15 { p.armLift = tr.fromLift + (tr.lift - tr.fromLift) * easeInOut(s / 0.15) }
+            else if s < 0.40 { p.armLift = tr.lift }
+            else { p.armLift = tr.lift * Self.springLanding((s - 0.40) / 0.60) }
+            if s < 0.12 { p.armAngle = tr.fromAngle }
+            else if s < 0.46 { p.armAngle = tr.fromAngle + (target - tr.fromAngle) * Self.swing((s - 0.12) / 0.34) }
             else { p.armAngle = target }
         } else {
             p.armAngle = target
