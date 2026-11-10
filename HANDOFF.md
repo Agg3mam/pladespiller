@@ -176,7 +176,7 @@ Faldgruber, vi har mødt:
 4. **Menuen:** Farve ▸ og "Vælg farve…", der skal give fokus tilbage, når panelet lukkes. "Fjern widget".
 5. Spoling i **Musik** (Spotify er bekræftet live).
 
-**Animationer og look 2026-11-10** (grenen `polish/animationer-og-look`; ikke flettet ind i `main`, ikke udgivet):
+**Animationer og look 2026-11-10** (flettet ind i `main` 2026-11-10; ikke udgivet som release endnu, versionen hedder stadig 0.8):
 - **Coverskift:** det næste cover kan ikke hentes på forhånd (hverken Spotify eller Musik oplyser næste sang). `Views/CoverHold.swift` lader i stedet den gamle plade spille videre, til det nye cover er hentet (højst 2,5 s), og så sker hele pladeskiftet på én gang. Det nye cover vokser ud fra midten (`previousMask` i `TurntableLayer`). Slået fra i snapshots (`CoverHold.enabled`).
 - **Armens bevægelse:** blød landing med ét lille hop (`springLanding`, `hops`, `dropBounce` i `TurntableMotion`), også efter et slip. Brugeren fandt en kraftigere fjeder "for voldsom". `ArmDragTest` tillader nu den tilsigtede fjeder efter slip (`springRate`).
 - **Armens udseende (realistiske temaer):** grov, mat sort med korn (`roughBlack` i `Arm3D`), små dele i blankt metal. Brugeren valgte selv mat sort frem for metal og ville beholde den oprindelige buede form.
