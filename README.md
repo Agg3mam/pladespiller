@@ -38,8 +38,9 @@ Fortryder du en tilladelse, kan du ændre den i Systemindstillinger ▸ Anonymit
   - Julestemning: Til, Fra eller Automatisk i julen (1. dec–6. jan), og Sne på skrivebordet
   - Sprog: Dansk, English eller Automatisk (som Macen)
   - Lås placering, Åbn ved login, Fjern widget
+  - **Søg efter opdatering…** henter den nyeste udgave fra GitHub, skifter appen ud og starter den igen. Den spørger kun GitHub, når du selv vælger punktet.
 
-I temaet Flad er armen hvid, når macOS står i lys tilstand, og sort i mørk tilstand. I de andre temaer er armen en lille 3D-model med ægte metal og lys.
+I temaet Flad er armen hvid, når macOS står i lys tilstand, og sort i mørk tilstand. I de andre temaer er armen en lille 3D-model i grov, mat sort med enkelte dele i blankt metal, belyst som en rigtig genstand.
 
 ## Julestemning
 

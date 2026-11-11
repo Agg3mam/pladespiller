@@ -188,6 +188,10 @@ Faldgruber, vi har mødt:
 - Brugeren kører temaet **Auto** i Stor, uden knapper og med sangtekst.
 - Live-tjekket i `--render-snapshots` melder 1 fejl ("sang 3 … synlig etiket = B, forventet C"). Den var der også før disse ændringer og er ikke undersøgt.
 
+**Udgivet som v0.9 på GitHub 2026-11-11** (animationer og look + opdateringsknap). Fra 0.9 kan appen opdatere sig selv; ældre udgaver skal hente 0.9 i hånden én gang.
+
+**Opdateringsknap 2026-11-10** (`Window/Updater.swift`): menu ▸ "Søg efter opdatering…" spørger GitHub efter nyeste udgivelse (repoet er offentligt), henter `Pladespiller.zip`, tjekker bundle-id, version og at den er signeret med samme certifikat som den kørende app, skifter appen ud og genstarter. Kun når brugeren selv vælger punktet; appen tjekker ikke af sig selv. Test uden at installere: `--update-check [--download] [--as <version>]`. Knappen finder først noget, når der udgives en version højere end den installerede – husk at hæve versionen i `Info.plist` ved hver udgivelse.
+
 **Fejlrettelser 2026-11-08** (efter "nederen bugs ved fullscreen"; ikke udgivet endnu):
 - Sangteksten på fuld skærm og i vinduet kunne gå ned. Det skete, når listen blev animeret forbi enden af en kortere tekst, så `ForEach`-intervallet blev tomt. Nu klemmes positionen, listen får `.id(trackKey)`, og urets linje tjekkes mod tekstens længde.
 - Fuld skærm lukkede, når skærmen gik i dvale (skærmen forsvandt fra `NSScreen.screens`). Nu huskes skærmen (`pladespiller.fullscreen.resumeScreen`). Fuld skærm åbner igen, når skærmen kommer tilbage, og også efter genstart. Kun Esc eller menuen glemmer den.

@@ -11,6 +11,7 @@ import SwiftUI
 ///   --lyrics "Titel" "Kunstner" [sek]  hent sangtekst fra LRCLIB og print den
 ///   --unregister-login-item   meld "Åbn ved login" fra og afslut (scripts/uninstall.sh)
 ///   --window-selftest [dir]   tjek gitter/placering og tegn skallen til PNG (Vindue-agenten)
+///   --update-check [--download] [--as <version>]  test opdateringen mod GitHub uden at installere
 ///   --render-arm <fil.png>    tegn et nærbillede af den realistiske arm og afslut
 ///   --arm-test [dir]          grib/træk i armen med syntetiske musehændelser og mål animationen (Grafik-agenten)
 @main
@@ -27,6 +28,12 @@ enum PladespillerMain {
             let dir = args.indices.contains(i + 1) ? args[i + 1] : "snapshots"
             SnapshotRenderer.run(outputDirectory: URL(fileURLWithPath: dir))
             exit(0)
+        }
+        if args.contains("--update-check") {
+            // Test af "Søg efter opdatering…": spørg GitHub, og hent/tjek evt. filen (--download) uden at installere.
+            let pretend = args.firstIndex(of: "--as").flatMap { args.indices.contains($0 + 1) ? args[$0 + 1] : nil }
+            Task { exit(await Updater.debugCheck(download: args.contains("--download"), pretend: pretend)) }
+            RunLoop.main.run()
         }
         if let i = args.firstIndex(of: "--render-arm"), args.indices.contains(i + 1) {
             // Nærbillede af den realistiske arm (stor widget, træ, 4x) – hurtigt at se på, når armens model ændres.

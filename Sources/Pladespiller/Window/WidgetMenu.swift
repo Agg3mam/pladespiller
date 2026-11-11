@@ -102,6 +102,13 @@ final class WidgetMenu {
         let login = item(L("Åbn ved login", "Open at login"), checked: LoginItem.isEnabled) { LoginItem.toggle() }
         if LoginItem.needsApproval { login.state = .mixed }   // afventer godkendelse i Systemindstillinger
         menu.addItem(login)
+        let update = item(L("Søg efter opdatering…", "Check for update…"), checked: false) {
+            // Efter menuens sporingsløkke (viser dialoger).
+            DispatchQueue.main.async { MainActor.assumeIsolated { Updater.checkFromMenu() } }
+        }
+        update.toolTip = L("Henter den nyeste udgivelse fra GitHub (version \(Updater.currentVersion) nu)",
+                           "Fetches the latest release from GitHub (version \(Updater.currentVersion) now)")
+        menu.addItem(update)
         menu.addItem(.separator())
 
         menu.addItem(item(L("Fjern widget", "Remove widget"), checked: false) {
